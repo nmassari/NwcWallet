@@ -14,6 +14,7 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@zxing/browser": "^0.2.0",
     "nwckit": "^0.1.2"
   },
   "devDependencies": {

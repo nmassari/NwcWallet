@@ -19,6 +19,10 @@
     box-sizing: border-box;
 }
 
+[hidden] {
+    display: none !important;
+}
+
 html,
 body {
     margin: 0;
@@ -92,6 +96,7 @@ button:disabled {
 }
 
 .app-view {
+    position: relative;
     display: none;
     animation: view-in .18s ease-out;
 }
@@ -322,7 +327,7 @@ button:disabled {
 
 .button-row {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
     align-items: stretch;
     gap: 10px;
     margin-top: 12px;
@@ -444,6 +449,91 @@ button:disabled {
     border-top: 1px solid rgba(255,255,255,.1);
     background: rgba(8,12,22,.88);
     backdrop-filter: blur(18px);
+}
+
+.scanner-overlay {
+    position: fixed;
+    z-index: 20;
+    inset: 0;
+    display: grid;
+    place-items: end center;
+    padding: 16px;
+    background: rgba(0,0,0,.72);
+}
+
+.scanner-sheet {
+    width: min(100%, 520px);
+    padding: 18px;
+    border: 1px solid var(--line);
+    border-radius: 28px;
+    background: var(--panel);
+    box-shadow: var(--shadow);
+}
+
+.scanner-video {
+    display: block;
+    width: 100%;
+    aspect-ratio: 1;
+    object-fit: cover;
+    border-radius: 22px;
+    border: 1px solid var(--line);
+    background: #000;
+}
+
+.scanner-build {
+    margin-top: 8px;
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 11px;
+    text-align: center;
+    opacity: .72;
+}
+
+.swap-access-modal {
+    position: absolute;
+    z-index: 4;
+    inset: 58px 0 auto;
+    min-height: 360px;
+    display: grid;
+    place-items: center;
+    padding: 20px 4px;
+    border-radius: 28px;
+    background: rgba(5,8,16,.74);
+    backdrop-filter: blur(12px);
+}
+
+.swap-access-card {
+    width: min(100%, 350px);
+    padding: 22px;
+    border: 1px solid rgba(255,123,114,.35);
+    border-radius: 24px;
+    background: rgba(25,14,20,.96);
+    box-shadow: var(--shadow);
+    text-align: center;
+}
+
+.swap-lock-icon {
+    width: 42px;
+    height: 42px;
+    display: inline-grid;
+    place-items: center;
+    margin-bottom: 12px;
+    border-radius: 14px;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    color: #271200;
+    font-weight: 900;
+}
+
+.swap-access-card h2 {
+    margin: 0 0 10px;
+    font-size: 22px;
+}
+
+.swap-access-card p {
+    margin: 0;
+    color: #ffd8d5;
+    font-size: 14px;
+    line-height: 1.45;
 }
 
 .nav-item {

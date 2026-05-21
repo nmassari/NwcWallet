@@ -1,14 +1,23 @@
 import "../css/ecs.css";
+import { BrowserQRCodeReader } from "@zxing/browser";
 import { NwcKit, parseNwcUri } from "nwckit";
 import { InvoiceQr } from "./invoice-qr.js";
 
 const savedConnectionKey = "nwc_wallet_connection";
+const cameraPermissionPromptKey = "nwc_wallet_camera_permission_prompted_v3";
+const appBuild = "qr-camera-v7-20260521";
+const easyCryptoSendHost = "easycryptosend.it";
 
 let client = null;
 let connection = null;
 let lastCreatedInvoice = "";
 let lastSwapDepositAddress = "";
 let currentView = "home";
+let qrReader = null;
+let scannerControls = null;
+let scannerStream = null;
+let activeScanTarget = null;
+let activeScanStatus = null;
 
 function $(id) {
     return document.getElementById(id);
@@ -32,6 +41,36 @@ function status(id, message, type = "info") {
     el.dataset.type = type;
 }
 
+function scannerStatus(message, type = "info") {
+    status("qrScannerStatus", `${message}\n${appBuild}`, type);
+}
+
+function getCameraErrorMessage(err) {
+    const name = err?.name || "CameraError";
+
+    if (name === "NotAllowedError" || name === "PermissionDeniedError") {
+        return "Permesso camera negato. Abilita la camera dal lucchetto nella barra indirizzi e riprova.";
+    }
+
+    if (name === "NotFoundError" || name === "DevicesNotFoundError") {
+        return "Nessuna camera trovata dal browser. Se stai usando un simulatore o desktop senza camera, usa Paste.";
+    }
+
+    if (name === "NotReadableError" || name === "TrackStartError") {
+        return "Camera occupata o non leggibile. Chiudi altre app che usano la camera e riprova.";
+    }
+
+    if (name === "OverconstrainedError" || name === "ConstraintNotSatisfiedError") {
+        return "Camera trovata, ma non compatibile con i parametri richiesti. Riprovo con impostazioni base.";
+    }
+
+    if (location.protocol !== "https:" && location.hostname !== "localhost" && location.hostname !== "127.0.0.1") {
+        return "La camera richiede HTTPS oppure localhost.";
+    }
+
+    return `Camera non disponibile (${name}). Usa Paste oppure controlla i permessi del browser.`;
+}
+
 function clearStatus(id) {
     const el = $(id);
     if (!el) return;
@@ -43,6 +82,22 @@ function clearStatus(id) {
 function shorten(input, start = 10, end = 8) {
     if (!input) return "-";
     return input.length <= start + end + 3 ? input : `${input.slice(0, start)}...${input.slice(-end)}`;
+}
+
+function currentNwcString() {
+    return $("nwcInput")?.value?.trim() || localStorage.getItem(savedConnectionKey) || "";
+}
+
+function hasEasyCryptoSendSwapAccess() {
+    return currentNwcString().toLowerCase().includes(easyCryptoSendHost);
+}
+
+function updateSwapAccessGate(view = currentView) {
+    const isBlocked = view === "swap" && !hasEasyCryptoSendSwapAccess();
+
+    $("swapAccessModal").hidden = !isBlocked;
+    $("createForwardSwapButton").disabled = isBlocked || !client;
+    $("createReverseSwapButton").disabled = isBlocked || !client;
 }
 
 function setView(view) {
@@ -64,6 +119,8 @@ function setView(view) {
     document.querySelectorAll("[data-view-target]").forEach(button => {
         button.classList.toggle("active", button.dataset.viewTarget === activeTarget);
     });
+
+    updateSwapAccessGate(view);
 }
 
 function requiresConnection(view) {
@@ -83,6 +140,7 @@ function setConnectedUi(isConnected) {
     $("createReverseSwapButton").disabled = !isConnected;
     $("settingsClearConnectionButton").disabled = !localStorage.getItem(savedConnectionKey);
     $("clearConnectionButton").disabled = !localStorage.getItem(savedConnectionKey);
+    updateSwapAccessGate();
 }
 
 function clearWalletInfo() {
@@ -249,6 +307,12 @@ async function createForwardSwap() {
         return;
     }
 
+    if (!hasEasyCryptoSendSwapAccess()) {
+        updateSwapAccessGate("swap");
+        status("swapStatus", "Gli swap sono ammessi esclusivamente con chiave Nostr generata da easycryptosend.it.", "error");
+        return;
+    }
+
     const amount = Number($("swapAmountInput").value);
     const invoice = $("swapInvoiceInput").value.trim();
 
@@ -283,6 +347,12 @@ async function createReverseSwap() {
     if (!client) {
         status("swapStatus", "Wallet not connected.", "error");
         setView("nwc-string");
+        return;
+    }
+
+    if (!hasEasyCryptoSendSwapAccess()) {
+        updateSwapAccessGate("swap");
+        status("swapStatus", "Gli swap sono ammessi esclusivamente con chiave Nostr generata da easycryptosend.it.", "error");
         return;
     }
 
@@ -379,6 +449,151 @@ function updateReverseSwapAddressPreview(address) {
     text("reverseSwapAddressShort", shorten(address, 14, 14));
 }
 
+function applyScannedValue(targetId, rawValue) {
+    const scannedValue = normalizeScannedValue(targetId, rawValue);
+    value(targetId, scannedValue);
+
+    if (targetId === "payInvoiceInput") {
+        updatePayInvoicePreview(scannedValue);
+    }
+
+    if (targetId === "swapInvoiceInput") {
+        updateSwapInvoicePreview(scannedValue);
+    }
+
+    if (targetId === "reverseSwapAddressInput") {
+        updateReverseSwapAddressPreview(scannedValue);
+    }
+}
+
+function normalizeScannedValue(targetId, rawValue) {
+    const value = (rawValue || "").trim();
+
+    if (targetId === "payInvoiceInput" || targetId === "swapInvoiceInput") {
+        return value.toLowerCase().startsWith("lightning:")
+            ? value.slice("lightning:".length)
+            : value;
+    }
+
+    if (targetId === "reverseSwapAddressInput" && value.toLowerCase().startsWith("bitcoin:")) {
+        return value.slice("bitcoin:".length).split("?")[0];
+    }
+
+    return value;
+}
+
+async function requestCameraPermissionOnStartup() {
+    if (localStorage.getItem(cameraPermissionPromptKey)) {
+        return;
+    }
+
+    if (!navigator.mediaDevices?.getUserMedia) {
+        return;
+    }
+
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+            video: true,
+            audio: false
+        });
+        stream.getTracks().forEach(track => track.stop());
+        localStorage.setItem(cameraPermissionPromptKey, "1");
+    } catch (err) {
+        localStorage.removeItem(cameraPermissionPromptKey);
+        console.warn("Camera permission was not granted:", err);
+    }
+}
+
+async function openScanner(targetId, statusId) {
+    if (!navigator.mediaDevices?.getUserMedia) {
+        status(statusId, "Camera non supportata da questo browser.", "error");
+        return;
+    }
+
+    activeScanTarget = targetId;
+    activeScanStatus = statusId;
+    $("qrScannerOverlay").hidden = false;
+    text("qrScannerBuild", appBuild);
+    scannerStatus("Autorizza la camera.", "info");
+
+    try {
+        closeScanner(false);
+        activeScanTarget = targetId;
+        activeScanStatus = statusId;
+        $("qrScannerOverlay").hidden = false;
+        text("qrScannerBuild", appBuild);
+        scannerStatus("Avvio camera...", "info");
+
+        const video = $("qrScannerVideo");
+        scannerStream = await navigator.mediaDevices.getUserMedia({
+            video: true,
+            audio: false
+        });
+
+        video.srcObject = scannerStream;
+        video.setAttribute("playsinline", "true");
+        await video.play();
+        scannerStatus("Inquadra il QR code.", "info");
+
+        qrReader = qrReader || new BrowserQRCodeReader();
+        scannerControls = await qrReader.decodeFromVideoElement(
+            video,
+            (result) => {
+                if (!result) return;
+
+                const scannedText = result.getText();
+                applyScannedValue(activeScanTarget, scannedText);
+                status(activeScanStatus, "QR acquired.", "success");
+                closeScanner();
+            }
+        );
+
+        setTimeout(() => {
+            if (!scannerControls || video.videoWidth > 0) return;
+
+            scannerStatus(
+                "Camera non avviata. Controlla i permessi del browser o usa Paste.",
+                "error"
+            );
+        }, 2500);
+    } catch (err) {
+        console.error(err);
+        closeScanner(false);
+        $("qrScannerOverlay").hidden = false;
+        text("qrScannerBuild", appBuild);
+
+        const message = getCameraErrorMessage(err);
+        scannerStatus(message, "error");
+        status(statusId, message, "error");
+    }
+}
+
+function closeScanner(hideOverlay = true) {
+    try {
+        scannerControls?.stop();
+    } catch (err) {
+        console.warn(err);
+    }
+
+    scannerControls = null;
+    if (scannerStream) {
+        scannerStream.getTracks().forEach(track => track.stop());
+        scannerStream = null;
+    }
+
+    const video = $("qrScannerVideo");
+    if (video) {
+        video.pause();
+        video.srcObject = null;
+    }
+
+    activeScanTarget = null;
+    activeScanStatus = null;
+    if (hideOverlay) {
+        $("qrScannerOverlay").hidden = true;
+    }
+}
+
 async function copyText(textValue, statusId) {
     if (!textValue) {
         status(statusId, "Nothing to copy.", "error");
@@ -418,6 +633,10 @@ function wireEvents() {
         button.addEventListener("click", () => setSwapMode(button.dataset.swapMode));
     });
 
+    document.querySelectorAll("[data-scan-target]").forEach(button => {
+        button.addEventListener("click", () => openScanner(button.dataset.scanTarget, button.dataset.scanStatus));
+    });
+
     $("saveNwcStringButton").addEventListener("click", connectWallet);
     $("disconnectButton").addEventListener("click", disconnectWallet);
     $("refreshBalanceButton").addEventListener("click", async () => {
@@ -433,6 +652,7 @@ function wireEvents() {
     $("payInvoiceButton").addEventListener("click", payInvoice);
     $("createForwardSwapButton").addEventListener("click", createForwardSwap);
     $("createReverseSwapButton").addEventListener("click", createReverseSwap);
+    $("pasteNwcStringButton").addEventListener("click", () => pasteInto("nwcInput", "nwcStringStatus"));
     $("pastePayInvoiceButton").addEventListener("click", () => pasteInto("payInvoiceInput", "payStatus"));
     $("pasteSwapInvoiceButton").addEventListener("click", () => pasteInto("swapInvoiceInput", "swapStatus"));
     $("pasteReverseSwapAddressButton").addEventListener("click", () => pasteInto("reverseSwapAddressInput", "swapStatus"));
@@ -464,9 +684,11 @@ function wireEvents() {
     $("reverseSwapAddressQrImage").addEventListener("click", () => copyText($("reverseSwapAddressInput").value.trim(), "swapStatus"));
     $("clearConnectionButton").addEventListener("click", forgetConnection);
     $("settingsClearConnectionButton").addEventListener("click", forgetConnection);
+    $("closeScannerButton").addEventListener("click", closeScanner);
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
+    requestCameraPermissionOnStartup();
     const savedConnection = restoreSavedConnection();
     clearWalletInfo();
     setConnectedUi(false);

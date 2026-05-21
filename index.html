@@ -68,7 +68,11 @@
             </div>
             <label class="field-label" for="nwcInput">NWC string</label>
             <textarea id="nwcInput" class="field textarea" spellcheck="false" placeholder="nostr+walletconnect://..."></textarea>
-            <button id="saveNwcStringButton" class="primary-button" type="button">Salva</button>
+            <div class="button-row">
+                <button id="saveNwcStringButton" class="primary-button" type="button">Salva</button>
+                <button id="pasteNwcStringButton" class="secondary-button" type="button">Paste</button>
+                <button class="secondary-button" type="button" data-scan-target="nwcInput" data-scan-status="nwcStringStatus">Scan</button>
+            </div>
             <button id="disconnectButton" class="danger-button" type="button">Disconnetti</button>
             <button id="clearConnectionButton" class="danger-button subtle-danger" type="button">Dimentica NWC string</button>
             <div id="nwcStringStatus" class="status-line"></div>
@@ -113,6 +117,7 @@
             <div class="button-row">
                 <button id="payInvoiceButton" class="primary-button" type="button">Pay invoice</button>
                 <button id="pastePayInvoiceButton" class="secondary-button" type="button">Paste</button>
+                <button class="secondary-button" type="button" data-scan-target="payInvoiceInput" data-scan-status="payStatus">Scan</button>
             </div>
             <div id="payStatus" class="status-line"></div>
         </section>
@@ -120,6 +125,13 @@
         <section class="app-view" data-view="swap">
             <div class="view-head">
                 <h1>Swap</h1>
+            </div>
+            <div id="swapAccessModal" class="swap-access-modal" hidden role="alertdialog" aria-labelledby="swapAccessTitle" aria-describedby="swapAccessText">
+                <div class="swap-access-card">
+                    <div class="swap-lock-icon">!</div>
+                    <h2 id="swapAccessTitle">Swap non disponibili</h2>
+                    <p id="swapAccessText">Gli swap sono ammessi esclusivamente con chiave Nostr generata da easycryptosend.it.</p>
+                </div>
             </div>
             <div class="segmented-control" aria-label="Swap direction">
                 <button class="segment active" type="button" data-swap-mode="forward">BTC to Lightning</button>
@@ -141,6 +153,7 @@
                 <div class="button-row">
                     <button id="createForwardSwapButton" class="primary-button" type="button">Create swap</button>
                     <button id="pasteSwapInvoiceButton" class="secondary-button" type="button">Paste</button>
+                    <button class="secondary-button" type="button" data-scan-target="swapInvoiceInput" data-scan-status="swapStatus">Scan</button>
                 </div>
                 <label class="field-label" for="swapAddressOutput">Deposit address</label>
                 <div id="swapAddressSummary" class="invoice-summary" hidden>
@@ -169,6 +182,7 @@
                 <div class="button-row">
                     <button id="createReverseSwapButton" class="primary-button" type="button">Create withdrawal</button>
                     <button id="pasteReverseSwapAddressButton" class="secondary-button" type="button">Paste</button>
+                    <button class="secondary-button" type="button" data-scan-target="reverseSwapAddressInput" data-scan-status="swapStatus">Scan</button>
                 </div>
                 <label class="field-label" for="reverseSwapInvoiceOutput">Invoice to pay</label>
                 <div id="reverseSwapInvoiceSummary" class="invoice-summary" hidden>
@@ -218,5 +232,17 @@
         <button class="nav-item" type="button" data-view-target="swap">Swap</button>
         <button class="nav-item" type="button" data-view-target="settings">Impostazioni</button>
     </nav>
+
+    <div id="qrScannerOverlay" class="scanner-overlay" hidden>
+        <div class="scanner-sheet">
+            <div class="view-head">
+                <h1>Scan QR</h1>
+                <button id="closeScannerButton" class="text-button" type="button">Chiudi</button>
+            </div>
+            <video id="qrScannerVideo" class="scanner-video" muted playsinline autoplay></video>
+            <div id="qrScannerStatus" class="status-line">Scanner pronto.</div>
+            <div id="qrScannerBuild" class="scanner-build">qr-camera-v7-20260521</div>
+        </div>
+    </div>
 </body>
 </html>
