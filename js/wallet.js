@@ -11,6 +11,18 @@ const installPromptSnoozedUntilKey = "nwc_wallet_install_prompt_snoozed_until";
 const billingApiBaseUrl = "https://ocb.easycryptosend.it/api/billing";
 const appBuild = "qr-camera-v7-20260521";
 const easyCryptoSendHost = "easycryptosend.it";
+const bitcoinOnchainAsset = {
+    asset: "BTC",
+    chain: "bitcoin",
+    network: "mainnet",
+    rail: "onchain"
+};
+const bitcoinLightningAsset = {
+    asset: "BTC",
+    chain: "bitcoin",
+    network: "mainnet",
+    rail: "lightning"
+};
 
 let client = null;
 let connection = null;
@@ -124,6 +136,13 @@ function shorten(input, start = 10, end = 8) {
 
 function currentNwcString() {
     return $("nwcInput")?.value?.trim() || localStorage.getItem(savedConnectionKey) || "";
+}
+
+function satsAmount(amountSats) {
+    return {
+        value: String(Math.round(amountSats)),
+        unit: "sat"
+    };
 }
 
 function hasEasyCryptoSendSwapAccess() {
@@ -505,9 +524,12 @@ async function createForwardSwap() {
 
     try {
         status("swapStatus", "Creating swap...");
-        const swap = await client.createOnchainToLightningSwap({
-            amountSats: amount,
-            invoice
+        const swap = await client.createSwap({
+            direction: "onchain_to_lightning",
+            sendAsset: bitcoinOnchainAsset,
+            receiveAsset: bitcoinLightningAsset,
+            amount: satsAmount(amount),
+            receiveInvoice: invoice
         });
 
         lastSwapDepositAddress = swap.depositAddress || "";
@@ -548,9 +570,12 @@ async function createReverseSwap() {
 
     try {
         status("swapStatus", "Creating withdrawal...");
-        const swap = await client.createLightningToOnchainSwap({
-            amountSats: amount,
-            destinationAddress: address
+        const swap = await client.createSwap({
+            direction: "lightning_to_onchain",
+            sendAsset: bitcoinLightningAsset,
+            receiveAsset: bitcoinOnchainAsset,
+            amount: satsAmount(amount),
+            receiveAddress: address
         });
 
         const invoice = swap.invoice || "";
