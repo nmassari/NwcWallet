@@ -1,0 +1,23 @@
+{
+  "name": "NwcWallet",
+  "short_name": "NwcWallet",
+  "description": "A PWA wallet for Lightning payments and Bitcoin swaps via Nostr Wallet Connect.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#070b16",
+  "theme_color": "#f7931a",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/favicon.gif",
+      "sizes": "192x192",
+      "type": "image/gif"
+    },
+    {
+      "src": "/favicon.gif",
+      "sizes": "512x512",
+      "type": "image/gif"
+    }
+  ]
+}

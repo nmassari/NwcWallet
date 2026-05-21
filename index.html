@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#090d18" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="NwcWallet" />
+  <link rel="icon" type="image/gif" href="/favicon.gif" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <title>NwcWallet</title>
+  <script type="module" src="./js/common.js"></script>
+  <script type="module" src="./js/wallet.js"></script>
+</head>
+<body>
+    <main class="app-shell">
+        <header class="app-topbar">
+            <button class="icon-button" type="button" data-view-target="settings" aria-label="Settings">N</button>
+            <div>
+                <div class="app-title">NwcWallet</div>
+                <div id="walletConnectionState" class="app-subtitle">Non connesso</div>
+            </div>
+            <button id="refreshBalanceButton" class="icon-button" type="button" aria-label="Refresh balance">R</button>
+        </header>
+
+        <section class="app-view active" data-view="home">
+            <div class="balance-card">
+                <div class="balance-label">Balance</div>
+                <div id="walletBalance" class="balance-value">-</div>
+                <div id="walletAlias" class="balance-meta">NWC wallet</div>
+            </div>
+
+            <div class="quick-grid">
+                <button class="quick-action" type="button" data-view-target="receive">
+                    <span class="quick-icon">+</span>
+                    <span>Receive</span>
+                </button>
+                <button class="quick-action" type="button" data-view-target="pay">
+                    <span class="quick-icon">-></span>
+                    <span>Pay</span>
+                </button>
+                <button class="quick-action" type="button" data-view-target="swap">
+                    <span class="quick-icon">&lt;&gt;</span>
+                    <span>Swap</span>
+                </button>
+                <button class="quick-action" type="button" data-view-target="settings">
+                    <span class="quick-icon">.</span>
+                    <span>Impostazioni</span>
+                </button>
+            </div>
+
+            <div class="info-list">
+                <div class="info-row">
+                    <span>Relay</span>
+                    <strong id="walletRelay">-</strong>
+                </div>
+                <div class="info-row">
+                    <span>Pubkey</span>
+                    <strong id="walletPubkey">-</strong>
+                </div>
+            </div>
+        </section>
+
+        <section class="app-view" data-view="nwc-string">
+            <div class="view-head">
+                <h1>NWC String</h1>
+                <button class="text-button" type="button" data-view-target="settings">Indietro</button>
+            </div>
+            <label class="field-label" for="nwcInput">NWC string</label>
+            <textarea id="nwcInput" class="field textarea" spellcheck="false" placeholder="nostr+walletconnect://..."></textarea>
+            <button id="saveNwcStringButton" class="primary-button" type="button">Salva</button>
+            <button id="disconnectButton" class="danger-button" type="button">Disconnetti</button>
+            <button id="clearConnectionButton" class="danger-button subtle-danger" type="button">Dimentica NWC string</button>
+            <div id="nwcStringStatus" class="status-line"></div>
+        </section>
+
+        <section class="app-view" data-view="receive">
+            <div class="view-head">
+                <h1>Receive</h1>
+            </div>
+            <label class="field-label" for="receiveAmountInput">Amount sats</label>
+            <input id="receiveAmountInput" class="field" type="number" min="1" value="1000" />
+            <label class="field-label" for="receiveMemoInput">Memo</label>
+            <input id="receiveMemoInput" class="field" type="text" value="NwcWallet invoice" />
+            <button id="createInvoiceButton" class="primary-button" type="button">Create invoice</button>
+            <div id="createdInvoiceQrWrap" class="qr-wrap" hidden>
+                <img id="createdInvoiceQrImage" class="qr-image" alt="Invoice QR" />
+            </div>
+            <div id="createdInvoiceSummary" class="invoice-summary" hidden>
+                <span>Invoice ready</span>
+                <strong id="createdInvoiceShort">-</strong>
+            </div>
+            <div class="button-row">
+                <button id="copyCreatedInvoiceButton" class="secondary-button" type="button">Copy</button>
+                <button id="useCreatedInvoiceButton" class="secondary-button" type="button">Use to pay</button>
+            </div>
+            <div id="receiveStatus" class="status-line"></div>
+        </section>
+
+        <section class="app-view" data-view="pay">
+            <div class="view-head">
+                <h1>Pay</h1>
+            </div>
+            <label class="field-label" for="payInvoiceInput">Lightning invoice</label>
+            <textarea id="payInvoiceInput" class="field textarea" spellcheck="false" placeholder="lnbc..."></textarea>
+            <div id="payInvoiceSummary" class="invoice-summary" hidden>
+                <span>Invoice loaded</span>
+                <strong id="payInvoiceShort">-</strong>
+            </div>
+            <div id="payInvoiceQrWrap" class="qr-wrap" hidden>
+                <img id="payInvoiceQrImage" class="qr-image" alt="Payment QR" />
+            </div>
+            <div class="button-row">
+                <button id="payInvoiceButton" class="primary-button" type="button">Pay invoice</button>
+                <button id="pastePayInvoiceButton" class="secondary-button" type="button">Paste</button>
+            </div>
+            <div id="payStatus" class="status-line"></div>
+        </section>
+
+        <section class="app-view" data-view="swap">
+            <div class="view-head">
+                <h1>Swap</h1>
+            </div>
+            <div class="segmented-control" aria-label="Swap direction">
+                <button class="segment active" type="button" data-swap-mode="forward">BTC to Lightning</button>
+                <button class="segment" type="button" data-swap-mode="reverse">Lightning to BTC</button>
+            </div>
+
+            <div id="forwardSwapPanel">
+                <label class="field-label" for="swapAmountInput">Amount sats</label>
+                <input id="swapAmountInput" class="field" type="number" min="25000" value="25000" />
+                <label class="field-label" for="swapInvoiceInput">Lightning invoice</label>
+                <textarea id="swapInvoiceInput" class="field textarea" spellcheck="false" placeholder="lnbc..."></textarea>
+                <div id="swapInvoiceSummary" class="invoice-summary" hidden>
+                    <span>Invoice loaded</span>
+                    <strong id="swapInvoiceShort">-</strong>
+                </div>
+                <div id="swapInvoiceQrWrap" class="qr-wrap" hidden>
+                    <img id="swapInvoiceQrImage" class="qr-image" alt="Swap invoice QR" />
+                </div>
+                <div class="button-row">
+                    <button id="createForwardSwapButton" class="primary-button" type="button">Create swap</button>
+                    <button id="pasteSwapInvoiceButton" class="secondary-button" type="button">Paste</button>
+                </div>
+                <label class="field-label" for="swapAddressOutput">Deposit address</label>
+                <div id="swapAddressSummary" class="invoice-summary" hidden>
+                    <span>Deposit address ready</span>
+                    <strong id="swapAddressShort">-</strong>
+                </div>
+                <div id="swapAddressQrWrap" class="qr-wrap" hidden>
+                    <img id="swapAddressQrImage" class="qr-image" alt="Bitcoin deposit address QR" />
+                </div>
+                <textarea id="swapAddressOutput" class="field textarea output-field" readonly hidden></textarea>
+                <button id="copySwapAddressButton" class="secondary-button full-width-action" type="button" disabled>Copy address</button>
+            </div>
+
+            <div id="reverseSwapPanel" hidden>
+                <label class="field-label" for="reverseSwapAmountInput">Amount sats</label>
+                <input id="reverseSwapAmountInput" class="field" type="number" min="25000" value="25000" />
+                <label class="field-label" for="reverseSwapAddressInput">Bitcoin address</label>
+                <textarea id="reverseSwapAddressInput" class="field textarea" spellcheck="false" placeholder="bc1..."></textarea>
+                <div id="reverseSwapAddressSummary" class="invoice-summary" hidden>
+                    <span>Bitcoin address loaded</span>
+                    <strong id="reverseSwapAddressShort">-</strong>
+                </div>
+                <div id="reverseSwapAddressQrWrap" class="qr-wrap" hidden>
+                    <img id="reverseSwapAddressQrImage" class="qr-image" alt="Bitcoin address QR" />
+                </div>
+                <div class="button-row">
+                    <button id="createReverseSwapButton" class="primary-button" type="button">Create withdrawal</button>
+                    <button id="pasteReverseSwapAddressButton" class="secondary-button" type="button">Paste</button>
+                </div>
+                <label class="field-label" for="reverseSwapInvoiceOutput">Invoice to pay</label>
+                <div id="reverseSwapInvoiceSummary" class="invoice-summary" hidden>
+                    <span>Invoice ready</span>
+                    <strong id="reverseSwapInvoiceShort">-</strong>
+                </div>
+                <textarea id="reverseSwapInvoiceOutput" class="field textarea output-field" readonly hidden></textarea>
+                <div id="reverseSwapQrWrap" class="qr-wrap" hidden>
+                    <img id="reverseSwapQrImage" class="qr-image" alt="Reverse swap invoice QR" />
+                </div>
+            </div>
+
+            <div id="swapStatus" class="status-line"></div>
+        </section>
+
+        <section class="app-view" data-view="settings">
+            <div class="view-head">
+                <h1>Impostazioni</h1>
+            </div>
+            <div class="info-list">
+                <button class="settings-row" type="button" data-view-target="nwc-string">
+                    <span>NWC String</span>
+                    <strong id="settingsNwcStringState">Non impostata</strong>
+                </button>
+                <div class="info-row">
+                    <span>Connessione</span>
+                    <strong id="settingsConnectionState">Off</strong>
+                </div>
+                <div class="info-row">
+                    <span>Wallet pubkey</span>
+                    <strong id="settingsWalletPubkey">-</strong>
+                </div>
+                <div class="info-row">
+                    <span>Relay</span>
+                    <strong id="settingsRelay">-</strong>
+                </div>
+            </div>
+            <button id="settingsClearConnectionButton" class="danger-button" type="button">Dimentica NWC string</button>
+            <div id="settingsStatus" class="status-line"></div>
+        </section>
+    </main>
+
+    <nav class="bottom-nav" aria-label="Wallet navigation">
+        <button class="nav-item active" type="button" data-view-target="home">Home</button>
+        <button class="nav-item" type="button" data-view-target="receive">Receive</button>
+        <button class="nav-item" type="button" data-view-target="pay">Pay</button>
+        <button class="nav-item" type="button" data-view-target="swap">Swap</button>
+        <button class="nav-item" type="button" data-view-target="settings">Impostazioni</button>
+    </nav>
+</body>
+</html>
