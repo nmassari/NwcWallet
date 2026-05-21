@@ -5,6 +5,7 @@ import { InvoiceQr } from "./invoice-qr.js";
 
 const savedConnectionKey = "nwc_wallet_connection";
 const cameraPermissionPromptKey = "nwc_wallet_camera_permission_prompted_v3";
+const themeKey = "nwc_wallet_theme";
 const appBuild = "qr-camera-v7-20260521";
 const easyCryptoSendHost = "easycryptosend.it";
 
@@ -90,6 +91,30 @@ function currentNwcString() {
 
 function hasEasyCryptoSendSwapAccess() {
     return currentNwcString().toLowerCase().includes(easyCryptoSendHost);
+}
+
+function getInitialTheme() {
+    const saved = localStorage.getItem(themeKey);
+    if (saved === "light" || saved === "dark") {
+        return saved;
+    }
+
+    return window.matchMedia?.("(prefers-color-scheme: light)")?.matches ? "light" : "dark";
+}
+
+function applyTheme(theme) {
+    const nextTheme = theme === "light" ? "light" : "dark";
+    document.documentElement.dataset.theme = nextTheme;
+    localStorage.setItem(themeKey, nextTheme);
+
+    const isLight = nextTheme === "light";
+    $("themeToggleButton")?.setAttribute("aria-checked", String(isLight));
+    text("themeToggleLabel", isLight ? "Light" : "Dark");
+}
+
+function toggleTheme() {
+    const currentTheme = document.documentElement.dataset.theme === "light" ? "light" : "dark";
+    applyTheme(currentTheme === "light" ? "dark" : "light");
 }
 
 function updateSwapAccessGate(view = currentView) {
@@ -690,9 +715,11 @@ function wireEvents() {
     $("clearConnectionButton").addEventListener("click", forgetConnection);
     $("settingsClearConnectionButton").addEventListener("click", forgetConnection);
     $("closeScannerButton").addEventListener("click", closeScanner);
+    $("themeToggleButton").addEventListener("click", toggleTheme);
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
+    applyTheme(getInitialTheme());
     requestCameraPermissionOnStartup();
     const savedConnection = restoreSavedConnection();
     clearWalletInfo();
