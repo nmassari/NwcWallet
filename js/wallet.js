@@ -622,10 +622,23 @@ async function openScanner(targetId, statusId) {
         scannerStatus("Starting camera...", "info");
 
         const video = $("qrScannerVideo");
-        scannerStream = await navigator.mediaDevices.getUserMedia({
-            video: true,
-            audio: false
-        });
+        try {
+            scannerStream = await navigator.mediaDevices.getUserMedia({
+                video: {
+                    facingMode: { ideal: "environment" }
+                },
+                audio: false
+            });
+        } catch (err) {
+            if (err?.name !== "OverconstrainedError" && err?.name !== "ConstraintNotSatisfiedError") {
+                throw err;
+            }
+
+            scannerStream = await navigator.mediaDevices.getUserMedia({
+                video: true,
+                audio: false
+            });
+        }
 
         video.srcObject = scannerStream;
         video.setAttribute("playsinline", "true");
