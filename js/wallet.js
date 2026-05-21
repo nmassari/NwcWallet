@@ -6,6 +6,8 @@ import { InvoiceQr } from "./invoice-qr.js";
 const savedConnectionKey = "nwc_wallet_connection";
 const cameraPermissionPromptKey = "nwc_wallet_camera_permission_prompted_v3";
 const themeKey = "nwc_wallet_theme";
+const installPromptDismissedKey = "nwc_wallet_install_prompt_dismissed";
+const installPromptSnoozedUntilKey = "nwc_wallet_install_prompt_snoozed_until";
 const appBuild = "qr-camera-v7-20260521";
 const easyCryptoSendHost = "easycryptosend.it";
 
@@ -19,6 +21,7 @@ let scannerControls = null;
 let scannerStream = null;
 let activeScanTarget = null;
 let activeScanStatus = null;
+let deferredInstallPrompt = null;
 
 function $(id) {
     return document.getElementById(id);
@@ -115,6 +118,75 @@ function applyTheme(theme) {
 function toggleTheme() {
     const currentTheme = document.documentElement.dataset.theme === "light" ? "light" : "dark";
     applyTheme(currentTheme === "light" ? "dark" : "light");
+}
+
+function isStandaloneMode() {
+    return window.matchMedia?.("(display-mode: standalone)")?.matches || window.navigator.standalone === true;
+}
+
+function isIosDevice() {
+    return /iphone|ipad|ipod/i.test(window.navigator.userAgent || "");
+}
+
+function shouldShowInstallPrompt() {
+    if (isStandaloneMode() || localStorage.getItem(installPromptDismissedKey)) {
+        return false;
+    }
+
+    const snoozedUntil = Number(localStorage.getItem(installPromptSnoozedUntilKey) || "0");
+    return !snoozedUntil || Date.now() > snoozedUntil;
+}
+
+function showInstallPrompt(mode) {
+    if (!shouldShowInstallPrompt()) {
+        return;
+    }
+
+    const prompt = $("installPrompt");
+    const installButton = $("installAppButton");
+    if (mode === "ios") {
+        text("installPromptText", "Tap Share, then Add to Home Screen. No store download required.");
+        installButton.hidden = true;
+    } else if (deferredInstallPrompt) {
+        text("installPromptText", "Use it like an app, directly from your browser. No store download required.");
+        text("installAppButton", "Add to Home Screen");
+        installButton.hidden = false;
+    } else {
+        text("installPromptText", "Open your browser menu and choose Install app or Add to Home Screen. No store download required.");
+        text("installAppButton", "How to add");
+        installButton.hidden = false;
+    }
+
+    prompt.hidden = false;
+}
+
+function hideInstallPrompt() {
+    $("installPrompt").hidden = true;
+}
+
+async function installPwa() {
+    if (!deferredInstallPrompt) {
+        const message = "Open your browser menu and choose Install app or Add to Home Screen.";
+        text("installPromptText", `${message} No store download required.`);
+        window.alert(message);
+        return;
+    }
+
+    deferredInstallPrompt.prompt();
+    const choice = await deferredInstallPrompt.userChoice;
+    deferredInstallPrompt = null;
+
+    if (choice?.outcome === "accepted") {
+        localStorage.setItem(installPromptDismissedKey, "1");
+        localStorage.removeItem(installPromptSnoozedUntilKey);
+        hideInstallPrompt();
+    }
+}
+
+function dismissInstallPrompt() {
+    const oneDayMs = 24 * 60 * 60 * 1000;
+    localStorage.setItem(installPromptSnoozedUntilKey, String(Date.now() + oneDayMs));
+    hideInstallPrompt();
 }
 
 function updateSwapAccessGate(view = currentView) {
@@ -716,10 +788,26 @@ function wireEvents() {
     $("settingsClearConnectionButton").addEventListener("click", forgetConnection);
     $("closeScannerButton").addEventListener("click", closeScanner);
     $("themeToggleButton").addEventListener("click", toggleTheme);
+    $("installAppButton").addEventListener("click", installPwa);
+    $("dismissInstallButton").addEventListener("click", dismissInstallPrompt);
 }
+
+window.addEventListener("beforeinstallprompt", event => {
+    event.preventDefault();
+    deferredInstallPrompt = event;
+    showInstallPrompt("browser");
+});
+
+window.addEventListener("appinstalled", () => {
+    deferredInstallPrompt = null;
+    localStorage.setItem(installPromptDismissedKey, "1");
+    localStorage.removeItem(installPromptSnoozedUntilKey);
+    hideInstallPrompt();
+});
 
 document.addEventListener("DOMContentLoaded", async () => {
     applyTheme(getInitialTheme());
+    showInstallPrompt(isIosDevice() ? "ios" : "browser");
     requestCameraPermissionOnStartup();
     const savedConnection = restoreSavedConnection();
     clearWalletInfo();

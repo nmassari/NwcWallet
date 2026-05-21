@@ -1,4 +1,4 @@
-const CACHE_NAME = "nwc-wallet-v5";
+const CACHE_NAME = "nwc-wallet-v6";
 const APP_SHELL = [
   "/",
   "/index.html",
@@ -7,7 +7,10 @@ const APP_SHELL = [
   "/js/wallet.js",
   "/js/invoice-qr.js",
   "/manifest.webmanifest",
-  "/favicon.gif"
+  "/favicon.gif",
+  "/icon-192.png",
+  "/icon-512.png",
+  "/apple-touch-icon.png"
 ];
 
 self.addEventListener("install", event => {

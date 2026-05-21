@@ -126,6 +126,75 @@ button:disabled {
     margin-bottom: 18px;
 }
 
+.install-prompt {
+    position: relative;
+    display: grid;
+    gap: 14px;
+    margin: -4px 0 18px;
+    padding: 16px;
+    border: 1px solid rgba(247,147,26,.28);
+    border-radius: 20px;
+    background:
+        linear-gradient(135deg, rgba(247,147,26,.16), transparent 62%),
+        var(--panel);
+    box-shadow: var(--shadow);
+}
+
+.install-dismiss {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    width: 34px;
+    height: 34px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: 1px solid var(--line);
+    border-radius: 50%;
+    background: var(--soft-surface);
+    color: var(--muted);
+    font-size: 20px;
+    font-weight: 800;
+    line-height: 0;
+}
+
+.install-prompt strong {
+    display: block;
+    padding-right: 36px;
+    font-size: 16px;
+}
+
+.install-prompt p {
+    margin: 5px 0 0;
+    color: var(--muted);
+    font-size: 13px;
+    line-height: 1.4;
+}
+
+.install-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 10px;
+    align-items: stretch;
+}
+
+.compact-action {
+    min-height: 66px;
+    margin-top: 0;
+    padding: 0 18px;
+    white-space: nowrap;
+}
+
+.install-actions .primary-button {
+    height: 66px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    align-self: stretch;
+    line-height: 1;
+}
+
 .app-title {
     font-size: 18px;
     font-weight: 800;

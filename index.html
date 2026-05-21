@@ -4,9 +4,12 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="theme-color" content="#090d18" />
+  <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="NwcWallet" />
   <link rel="icon" type="image/gif" href="/favicon.gif" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
   <link rel="manifest" href="/manifest.webmanifest" />
   <title>NwcWallet</title>
   <script type="module" src="./js/common.js"></script>
@@ -20,8 +23,19 @@
                 <div class="app-title">NwcWallet</div>
                 <div id="walletConnectionState" class="app-subtitle">Not connected</div>
             </div>
-            <button id="refreshBalanceButton" class="icon-button" type="button" aria-label="Refresh balance">↻</button>
+            <button id="refreshBalanceButton" class="icon-button" type="button" aria-label="Refresh balance">⟳</button>
         </header>
+
+        <section id="installPrompt" class="install-prompt" hidden>
+            <button id="dismissInstallButton" class="install-dismiss" type="button" aria-label="Dismiss install prompt">×</button>
+            <div>
+                <strong>Add NwcWallet to your Home Screen</strong>
+                <p id="installPromptText">Use it like an app, directly from your browser. No store download required.</p>
+            </div>
+            <div id="installPromptActions" class="install-actions">
+                <button id="installAppButton" class="primary-button compact-action" type="button">Add to Home Screen</button>
+            </div>
+        </section>
 
         <section class="app-view active" data-view="home">
             <div class="balance-card">
