@@ -440,6 +440,30 @@ button:disabled {
     box-shadow: 0 0 0 4px rgba(247,147,26,.14);
 }
 
+.setup-card {
+    display: grid;
+    gap: 8px;
+    margin-top: 16px;
+    padding: 15px;
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    background: var(--soft-surface-2);
+}
+
+.setup-card strong {
+    font-size: 15px;
+}
+
+.setup-card span {
+    color: var(--muted);
+    font-size: 13px;
+    line-height: 1.4;
+}
+
+.setup-card .full-width-action {
+    margin-top: 4px;
+}
+
 .textarea {
     min-height: 132px;
     resize: vertical;

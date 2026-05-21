@@ -8,6 +8,7 @@ const cameraPermissionPromptKey = "nwc_wallet_camera_permission_prompted_v3";
 const themeKey = "nwc_wallet_theme";
 const installPromptDismissedKey = "nwc_wallet_install_prompt_dismissed";
 const installPromptSnoozedUntilKey = "nwc_wallet_install_prompt_snoozed_until";
+const billingApiBaseUrl = "https://ocb.easycryptosend.it/api/billing";
 const appBuild = "qr-camera-v7-20260521";
 const easyCryptoSendHost = "easycryptosend.it";
 
@@ -81,6 +82,39 @@ function clearStatus(id) {
 
     el.textContent = "";
     delete el.dataset.type;
+}
+
+function getResponseData(payload) {
+    if (!payload || typeof payload !== "object") return null;
+    return payload.data ?? payload;
+}
+
+function getErrorMessage(payload, fallback) {
+    const error = payload?.error || payload?.message || "";
+    const detail = payload?.detail || "";
+
+    if (error && detail) {
+        return `${error}: ${detail}`;
+    }
+
+    return error || detail || payload?.raw || fallback;
+}
+
+async function readApiResponse(response) {
+    const raw = await response.text();
+    let payload = null;
+
+    try {
+        payload = raw ? JSON.parse(raw) : null;
+    } catch {
+        payload = { raw };
+    }
+
+    if (!response.ok) {
+        throw new Error(getErrorMessage(payload, `HTTP ${response.status}`));
+    }
+
+    return getResponseData(payload);
 }
 
 function shorten(input, start = 10, end = 8) {
@@ -265,6 +299,52 @@ async function connectWallet() {
     }
 
     await connectWithString(raw, true);
+}
+
+async function requestHostedWallet() {
+    const button = $("createWalletNwcButton");
+
+    try {
+        button.disabled = true;
+        status("nwcStringStatus", "Creating wallet...");
+
+        const createResponse = await fetch(`${billingApiBaseUrl}/orders`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                orderType: "NostrWalletConnect",
+                plan: "wallet",
+                label: "NwcWallet"
+            })
+        });
+
+        const order = await readApiResponse(createResponse);
+        const orderId = order?.orderId || order?.id;
+
+        if (!orderId) {
+            throw new Error("Wallet order was not created.");
+        }
+
+        status("nwcStringStatus", "Provisioning NWC string...");
+
+        const statusResponse = await fetch(`${billingApiBaseUrl}/orders/${orderId}`);
+        const result = await readApiResponse(statusResponse);
+        const nwcString = result?.nostrWalletConnect || "";
+
+        if (!nwcString) {
+            throw new Error("NWC string was not returned by the server.");
+        }
+
+        value("nwcInput", nwcString);
+        await connectWithString(nwcString, true);
+    } catch (err) {
+        console.error(err);
+        status("nwcStringStatus", err?.message || String(err), "error");
+    } finally {
+        button.disabled = false;
+    }
 }
 
 async function connectWithString(raw, saveConnection) {
@@ -753,6 +833,7 @@ function wireEvents() {
     });
 
     $("saveNwcStringButton").addEventListener("click", connectWallet);
+    $("createWalletNwcButton").addEventListener("click", requestHostedWallet);
     $("disconnectButton").addEventListener("click", disconnectWallet);
     $("refreshBalanceButton").addEventListener("click", async () => {
         try {
