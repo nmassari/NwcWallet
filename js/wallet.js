@@ -6,6 +6,7 @@ import { InvoiceQr } from "./invoice-qr.js";
 const savedConnectionKey = "nwc_wallet_connection";
 const cameraPermissionPromptKey = "nwc_wallet_camera_permission_prompted_v3";
 const themeKey = "nwc_wallet_theme";
+const swapHistoryKey = "nwc_wallet_swap_history";
 const installPromptDismissedKey = "nwc_wallet_install_prompt_dismissed";
 const installPromptSnoozedUntilKey = "nwc_wallet_install_prompt_snoozed_until";
 const billingApiBaseUrl = "https://ocb.easycryptosend.it/api/billing";
@@ -35,6 +36,7 @@ let scannerStream = null;
 let activeScanTarget = null;
 let activeScanStatus = null;
 let deferredInstallPrompt = null;
+let swapHistory = [];
 
 function $(id) {
     return document.getElementById(id);
@@ -134,6 +136,58 @@ function shorten(input, start = 10, end = 8) {
     return input.length <= start + end + 3 ? input : `${input.slice(0, start)}...${input.slice(-end)}`;
 }
 
+function formatSats(amount) {
+    const value = Number(amount || 0);
+    return `${Number.isFinite(value) ? value.toLocaleString("en-US") : "0"} sats`;
+}
+
+function formatTime(unixSeconds) {
+    if (!unixSeconds) return "-";
+    return new Date(unixSeconds * 1000).toLocaleString([], {
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit"
+    });
+}
+
+function createHistoryItem({ title, meta, amount, amountType, statusText }) {
+    const item = document.createElement("div");
+    item.className = "history-item";
+
+    const left = document.createElement("div");
+    const titleEl = document.createElement("div");
+    titleEl.className = "history-title";
+    titleEl.textContent = title;
+    const metaEl = document.createElement("div");
+    metaEl.className = "history-meta";
+    metaEl.textContent = meta || "-";
+    left.append(titleEl, metaEl);
+
+    const right = document.createElement("div");
+    const amountEl = document.createElement("div");
+    amountEl.className = `history-amount ${amountType || ""}`.trim();
+    amountEl.textContent = amount;
+    const statusEl = document.createElement("div");
+    statusEl.className = "history-status";
+    statusEl.textContent = statusText || "";
+    right.append(amountEl, statusEl);
+
+    item.append(left, right);
+    return item;
+}
+
+function setEmptyList(id, message) {
+    const list = $(id);
+    if (!list) return;
+
+    list.innerHTML = "";
+    const empty = document.createElement("div");
+    empty.className = "empty-state";
+    empty.textContent = message;
+    list.appendChild(empty);
+}
+
 function currentNwcString() {
     return $("nwcInput")?.value?.trim() || localStorage.getItem(savedConnectionKey) || "";
 }
@@ -147,6 +201,34 @@ function satsAmount(amountSats) {
 
 function hasEasyCryptoSendSwapAccess() {
     return currentNwcString().toLowerCase().includes(easyCryptoSendHost);
+}
+
+function loadSwapHistory() {
+    try {
+        const parsed = JSON.parse(localStorage.getItem(swapHistoryKey) || "[]");
+        swapHistory = Array.isArray(parsed) ? parsed : [];
+    } catch {
+        swapHistory = [];
+    }
+}
+
+function saveSwapHistory() {
+    localStorage.setItem(swapHistoryKey, JSON.stringify(swapHistory.slice(0, 20)));
+}
+
+function addSwapHistory(entry) {
+    if (!entry?.swapId) return;
+
+    swapHistory = [
+        {
+            ...entry,
+            createdAt: entry.createdAt || Date.now()
+        },
+        ...swapHistory.filter(item => item.swapId !== entry.swapId)
+    ].slice(0, 20);
+
+    saveSwapHistory();
+    renderSwapHistory();
 }
 
 function getInitialTheme() {
@@ -300,6 +382,8 @@ function clearWalletInfo() {
     text("walletPubkey", "-");
     text("settingsRelay", "-");
     text("settingsWalletPubkey", "-");
+    setEmptyList("transactionList", "Connect a wallet to see Lightning activity.");
+    renderSwapHistory();
 }
 
 async function refreshBalance() {
@@ -307,6 +391,97 @@ async function refreshBalance() {
 
     const balance = await client.getBalance();
     text("walletBalance", `${balance.balance} sats`);
+}
+
+async function refreshTransactions() {
+    if (!client) {
+        setEmptyList("transactionList", "Connect a wallet to see Lightning activity.");
+        return;
+    }
+
+    try {
+        const result = await client.listTransactions({ limit: 8 });
+        renderTransactions(result?.transactions || []);
+    } catch (err) {
+        console.error(err);
+        setEmptyList("transactionList", err?.message || "Transactions unavailable.");
+    }
+}
+
+function renderTransactions(transactions) {
+    const list = $("transactionList");
+    if (!list) return;
+
+    list.innerHTML = "";
+    if (!transactions.length) {
+        setEmptyList("transactionList", "No transactions yet.");
+        return;
+    }
+
+    transactions.forEach(tx => {
+        const type = tx.type === "outgoing" ? "outgoing" : "incoming";
+        const sign = type === "outgoing" ? "-" : "+";
+        list.appendChild(createHistoryItem({
+            title: type === "outgoing" ? "Sent payment" : "Received payment",
+            meta: `${formatTime(tx.settled_at || tx.created_at)} · ${shorten(tx.payment_hash || tx.invoice || "", 8, 8)}`,
+            amount: `${sign}${formatSats(tx.amount)}`,
+            amountType: type,
+            statusText: tx.settled === false ? "pending" : "settled"
+        }));
+    });
+}
+
+function renderSwapHistory() {
+    const list = $("swapHistoryList");
+    if (!list) return;
+
+    list.innerHTML = "";
+    if (!swapHistory.length) {
+        setEmptyList("swapHistoryList", "No swaps yet.");
+        return;
+    }
+
+    swapHistory.forEach(swap => {
+        list.appendChild(createHistoryItem({
+            title: swap.direction === "lightning_to_onchain" ? "Lightning to BTC" : "BTC to Lightning",
+            meta: `${new Date(swap.createdAt).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })} · ${shorten(swap.swapId, 8, 8)}`,
+            amount: formatSats(swap.amountSats),
+            amountType: swap.direction === "lightning_to_onchain" ? "outgoing" : "incoming",
+            statusText: swap.status || "pending"
+        }));
+    });
+}
+
+async function refreshSwapHistory() {
+    if (!client || !swapHistory.length) {
+        renderSwapHistory();
+        return;
+    }
+
+    const updated = [];
+    for (const swap of swapHistory) {
+        try {
+            const status = await client.getSwapStatus({ swapId: swap.swapId });
+            updated.push({
+                ...swap,
+                status: status?.status || swap.status,
+                updatedAt: Date.now()
+            });
+        } catch (err) {
+            console.warn(err);
+            updated.push(swap);
+        }
+    }
+
+    swapHistory = updated;
+    saveSwapHistory();
+    renderSwapHistory();
+}
+
+async function refreshHomeData() {
+    await refreshBalance();
+    await refreshTransactions();
+    await refreshSwapHistory();
 }
 
 async function connectWallet() {
@@ -383,7 +558,7 @@ async function connectWithString(raw, saveConnection) {
 
         await client.connect();
         const info = await client.getInfo();
-        await refreshBalance();
+        await refreshHomeData();
 
         const relay = connection.relayUrl || "-";
         const pubkey = connection.walletPubkey || "-";
@@ -457,6 +632,7 @@ async function createInvoice() {
         $("copyCreatedInvoiceButton").disabled = !lastCreatedInvoice;
         $("useCreatedInvoiceButton").disabled = !lastCreatedInvoice;
         status("receiveStatus", "Invoice ready.", "success");
+        await refreshTransactions();
     } catch (err) {
         console.error(err);
         status("receiveStatus", err?.message || String(err), "error");
@@ -480,7 +656,7 @@ async function payInvoice() {
         status("payStatus", "Paying...");
         await client.payInvoice({ invoice });
         status("payStatus", "Payment sent.", "success");
-        await refreshBalance();
+        await refreshHomeData();
     } catch (err) {
         console.error(err);
         status("payStatus", err?.message || String(err), "error");
@@ -533,6 +709,13 @@ async function createForwardSwap() {
         });
 
         lastSwapDepositAddress = swap.depositAddress || "";
+        addSwapHistory({
+            swapId: swap.swapId,
+            direction: "onchain_to_lightning",
+            amountSats: amount,
+            status: swap.status || "pending",
+            depositAddress: lastSwapDepositAddress
+        });
         value("swapAddressOutput", lastSwapDepositAddress);
         updateSwapAddressPreview(lastSwapDepositAddress, swap.bip21 || lastSwapDepositAddress);
         status("swapStatus", "Deposit address ready.", "success");
@@ -579,6 +762,14 @@ async function createReverseSwap() {
         });
 
         const invoice = swap.invoice || "";
+        addSwapHistory({
+            swapId: swap.swapId,
+            direction: "lightning_to_onchain",
+            amountSats: amount,
+            status: swap.status || "pending",
+            lockupAddress: swap.lockupAddress || "",
+            invoice
+        });
         value("reverseSwapInvoiceOutput", invoice);
         InvoiceQr.update("reverseSwapQrWrap", "reverseSwapQrImage", invoice);
         $("reverseSwapQrWrap").hidden = !invoice;
@@ -862,12 +1053,14 @@ function wireEvents() {
     $("disconnectButton").addEventListener("click", disconnectWallet);
     $("refreshBalanceButton").addEventListener("click", async () => {
         try {
-            await refreshBalance();
+            await refreshHomeData();
         } catch (err) {
             console.error(err);
             status("nwcStringStatus", err?.message || String(err), "error");
         }
     });
+    $("refreshTransactionsButton").addEventListener("click", refreshTransactions);
+    $("refreshSwapsButton").addEventListener("click", refreshSwapHistory);
 
     $("createInvoiceButton").addEventListener("click", createInvoice);
     $("payInvoiceButton").addEventListener("click", payInvoice);
@@ -928,6 +1121,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     applyTheme(getInitialTheme());
     showInstallPrompt(isIosDevice() ? "ios" : "browser");
     requestCameraPermissionOnStartup();
+    loadSwapHistory();
     const savedConnection = restoreSavedConnection();
     clearWalletInfo();
     setConnectedUi(false);

@@ -323,6 +323,97 @@ button:disabled {
     gap: 10px;
 }
 
+.history-section {
+    margin-top: 18px;
+}
+
+.section-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+
+.section-head h2 {
+    margin: 0;
+    font-size: 18px;
+    line-height: 1.1;
+}
+
+.mini-button {
+    min-height: 36px;
+    padding: 0 12px;
+    border-radius: 12px;
+    font-size: 12px;
+}
+
+.history-list {
+    display: grid;
+    gap: 8px;
+}
+
+.history-item {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 10px;
+    align-items: center;
+    min-height: 62px;
+    padding: 12px 14px;
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    background: var(--soft-surface-2);
+}
+
+.history-title {
+    font-weight: 850;
+    font-size: 14px;
+}
+
+.history-meta {
+    margin-top: 4px;
+    color: var(--muted);
+    font-size: 12px;
+    font-family: var(--mono);
+    overflow-wrap: anywhere;
+}
+
+.history-amount {
+    font-family: var(--mono);
+    font-size: 13px;
+    font-weight: 850;
+    text-align: right;
+    white-space: nowrap;
+}
+
+.history-amount.incoming {
+    color: var(--ok);
+}
+
+.history-amount.outgoing {
+    color: var(--err);
+}
+
+.history-status {
+    justify-self: end;
+    padding: 5px 8px;
+    border-radius: 999px;
+    background: var(--soft-surface-3);
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 850;
+}
+
+.empty-state {
+    padding: 14px;
+    border: 1px dashed var(--line);
+    border-radius: 18px;
+    color: var(--muted);
+    background: var(--soft-surface-2);
+    font-size: 13px;
+    text-align: center;
+}
+
 .info-row {
     min-height: 58px;
     display: grid;

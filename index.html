@@ -73,6 +73,26 @@
                     <strong id="walletPubkey">-</strong>
                 </div>
             </div>
+
+            <section class="history-section">
+                <div class="section-head">
+                    <h2>Lightning activity</h2>
+                    <button id="refreshTransactionsButton" class="text-button mini-button" type="button">Refresh</button>
+                </div>
+                <div id="transactionList" class="history-list">
+                    <div class="empty-state">No transactions yet.</div>
+                </div>
+            </section>
+
+            <section class="history-section">
+                <div class="section-head">
+                    <h2>Swaps</h2>
+                    <button id="refreshSwapsButton" class="text-button mini-button" type="button">Refresh</button>
+                </div>
+                <div id="swapHistoryList" class="history-list">
+                    <div class="empty-state">No swaps yet.</div>
+                </div>
+            </section>
         </section>
 
         <section class="app-view" data-view="nwc-string">
