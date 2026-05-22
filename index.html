@@ -74,6 +74,16 @@
                 </div>
             </div>
 
+            <div class="early-access-card">
+                <div>
+                    <strong>Early access</strong>
+                    <p>
+                        NwcWallet is connected to a young Lightning node. Payments and swaps may occasionally fail while liquidity and routing reliability grow.
+                    </p>
+                </div>
+                <a class="secondary-button support-link" href="https://app.easycryptosend.it/download.html#contribute" target="_blank" rel="noopener noreferrer">Support liquidity</a>
+            </div>
+
             <section class="history-section">
                 <div class="section-head">
                     <h2>Lightning activity</h2>
@@ -158,6 +168,9 @@
                 <button id="pastePayInvoiceButton" class="secondary-button" type="button">Paste</button>
                 <button class="secondary-button" type="button" data-scan-target="payInvoiceInput" data-scan-status="payStatus">Scan</button>
             </div>
+            <div class="context-note">
+                Payments depend on available Lightning routes. If a payment fails, try a smaller amount or try again later.
+            </div>
             <div id="payStatus" class="status-line"></div>
         </section>
 
@@ -175,6 +188,9 @@
             <div class="segmented-control" aria-label="Swap direction">
                 <button class="segment active" type="button" data-swap-mode="forward">BTC to Lightning</button>
                 <button class="segment" type="button" data-swap-mode="reverse">Lightning to BTC</button>
+            </div>
+            <div class="context-note">
+                Swaps are experimental and require Lightning liquidity. Route failures can happen while the node is still growing.
             </div>
 
             <div id="forwardSwapPanel">
@@ -240,6 +256,14 @@
         <section class="app-view" data-view="settings">
             <div class="view-head">
                 <h1>Settings</h1>
+            </div>
+            <div class="early-access-card compact-info">
+                <div>
+                    <strong>Network status</strong>
+                    <p>
+                        This wallet is in early access and connected to a growing Lightning node. Some payments or swaps may fail until liquidity improves.
+                    </p>
+                </div>
             </div>
             <div class="info-list">
                 <button class="settings-row" type="button" data-view-target="nwc-string">

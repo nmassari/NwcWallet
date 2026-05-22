@@ -285,6 +285,57 @@ button:disabled {
     overflow-wrap: anywhere;
 }
 
+.early-access-card {
+    display: grid;
+    gap: 12px;
+    margin: 14px 0 16px;
+    padding: 16px;
+    border: 1px solid rgba(247,147,26,.28);
+    border-radius: 20px;
+    background:
+        linear-gradient(135deg, rgba(247,147,26,.14), transparent 64%),
+        var(--soft-surface);
+}
+
+.early-access-card strong {
+    display: block;
+    font-size: 14px;
+    line-height: 1.2;
+}
+
+.early-access-card p {
+    margin: 6px 0 0;
+    color: var(--muted);
+    font-size: 13px;
+    line-height: 1.45;
+}
+
+.compact-info {
+    margin-top: 0;
+}
+
+.support-link {
+    width: 100%;
+    margin-top: 2px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 52px;
+    border-radius: 17px;
+    text-decoration: none;
+}
+
+.context-note {
+    margin: 12px 0 0;
+    padding: 12px 14px;
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    background: var(--soft-surface-2);
+    color: var(--muted);
+    font-size: 13px;
+    line-height: 1.45;
+}
+
 .quick-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
