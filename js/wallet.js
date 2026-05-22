@@ -237,7 +237,7 @@ function getInitialTheme() {
         return saved;
     }
 
-    return window.matchMedia?.("(prefers-color-scheme: light)")?.matches ? "light" : "dark";
+    return "dark"; // window.matchMedia?.("(prefers-color-scheme: light)")?.matches ? "light" : "dark";
 }
 
 function applyTheme(theme) {
