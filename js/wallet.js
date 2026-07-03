@@ -1,12 +1,21 @@
 import "../css/ecs.css";
 import { BrowserQRCodeReader } from "@zxing/browser";
-import { NwcKit, parseNwcUri } from "nwckit";
+import {
+    NostrPaymentMessages,
+    NwcKit,
+    generateInvoiceRequestCode,
+    parseNwcUri,
+    validateSubscriptionInvoiceResponse
+} from "nwckit";
 import { InvoiceQr } from "./invoice-qr.js";
 
 const savedConnectionKey = "nwc_wallet_connection";
 const cameraPermissionPromptKey = "nwc_wallet_camera_permission_prompted_v3";
 const themeKey = "nwc_wallet_theme";
 const swapHistoryKey = "nwc_wallet_swap_history";
+const contactsKey = "nwc_wallet_contacts";
+const subscriptionsKey = "nwc_wallet_subscriptions";
+const pendingInvoiceRequestsKey = "nwc_wallet_pending_invoice_requests";
 const installPromptDismissedKey = "nwc_wallet_install_prompt_dismissed";
 const installPromptSnoozedUntilKey = "nwc_wallet_install_prompt_snoozed_until";
 const billingApiBaseUrl = "https://ocb.easycryptosend.it/api/billing";
@@ -26,6 +35,7 @@ const bitcoinLightningAsset = {
 };
 
 let client = null;
+let appMessages = null;
 let connection = null;
 let lastCreatedInvoice = "";
 let lastSwapDepositAddress = "";
@@ -37,6 +47,9 @@ let activeScanTarget = null;
 let activeScanStatus = null;
 let deferredInstallPrompt = null;
 let swapHistory = [];
+let contacts = [];
+let subscriptions = [];
+let pendingInvoiceRequests = [];
 
 function $(id) {
     return document.getElementById(id);
@@ -151,6 +164,75 @@ function formatTime(unixSeconds) {
     });
 }
 
+function todayIsoDate() {
+    return toIsoDate(new Date());
+}
+
+function toIsoDate(date) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+}
+
+function parseIsoDate(value) {
+    if (!value) return null;
+    const [year, month, day] = value.split("-").map(Number);
+    if (!year || !month || !day) return null;
+    return new Date(year, month - 1, day);
+}
+
+function getIsoWeek(date) {
+    const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+    const day = d.getUTCDay() || 7;
+    d.setUTCDate(d.getUTCDate() + 4 - day);
+    const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+    const week = Math.ceil((((d.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+    return {
+        year: d.getUTCFullYear(),
+        week
+    };
+}
+
+function generateBillingPeriod(interval, dueDateValue) {
+    const dueDate = parseIsoDate(dueDateValue) || new Date();
+    const year = dueDate.getFullYear();
+    const month = String(dueDate.getMonth() + 1).padStart(2, "0");
+    const day = String(dueDate.getDate()).padStart(2, "0");
+
+    if (interval === "daily") {
+        return `${year}-${month}-${day}`;
+    }
+
+    if (interval === "weekly") {
+        const { year: weekYear, week } = getIsoWeek(dueDate);
+        return `${weekYear}-W${String(week).padStart(2, "0")}`;
+    }
+
+    if (interval === "yearly") {
+        return String(year);
+    }
+
+    return `${year}-${month}`;
+}
+
+function nextDueDate(interval, dueDateValue) {
+    const dueDate = parseIsoDate(dueDateValue) || new Date();
+    const next = new Date(dueDate);
+
+    if (interval === "daily") {
+        next.setDate(next.getDate() + 1);
+    } else if (interval === "weekly") {
+        next.setDate(next.getDate() + 7);
+    } else if (interval === "yearly") {
+        next.setFullYear(next.getFullYear() + 1);
+    } else {
+        next.setMonth(next.getMonth() + 1);
+    }
+
+    return toIsoDate(next);
+}
+
 function createHistoryItem({ title, meta, amount, amountType, statusText }) {
     const item = document.createElement("div");
     item.className = "history-item";
@@ -214,6 +296,93 @@ function loadSwapHistory() {
 
 function saveSwapHistory() {
     localStorage.setItem(swapHistoryKey, JSON.stringify(swapHistory.slice(0, 20)));
+}
+
+function loadSchedulerState() {
+    contacts = readJsonArray(contactsKey);
+    subscriptions = readJsonArray(subscriptionsKey);
+    pendingInvoiceRequests = readJsonArray(pendingInvoiceRequestsKey);
+}
+
+function readJsonArray(key) {
+    try {
+        const parsed = JSON.parse(localStorage.getItem(key) || "[]");
+        return Array.isArray(parsed) ? parsed : [];
+    } catch {
+        return [];
+    }
+}
+
+function saveContacts() {
+    localStorage.setItem(contactsKey, JSON.stringify(contacts.slice(0, 100)));
+}
+
+function saveSubscriptions() {
+    localStorage.setItem(subscriptionsKey, JSON.stringify(subscriptions.slice(0, 100)));
+}
+
+function savePendingInvoiceRequests() {
+    localStorage.setItem(pendingInvoiceRequestsKey, JSON.stringify(pendingInvoiceRequests.slice(0, 100)));
+}
+
+function upsertContact(contact) {
+    if (!contact?.pubkey) return;
+
+    contacts = [
+        {
+            ...contact,
+            updatedAt: Date.now()
+        },
+        ...contacts.filter(item => item.pubkey !== contact.pubkey)
+    ].slice(0, 100);
+
+    saveContacts();
+}
+
+function upsertSubscription(subscription) {
+    if (!subscription?.subscriptionId) return;
+
+    subscriptions = [
+        {
+            ...subscription,
+            updatedAt: Date.now()
+        },
+        ...subscriptions.filter(item => item.subscriptionId !== subscription.subscriptionId)
+    ].slice(0, 100);
+
+    saveSubscriptions();
+    renderScheduler();
+}
+
+function addPendingInvoiceRequest(request) {
+    pendingInvoiceRequests = [
+        request,
+        ...pendingInvoiceRequests.filter(item =>
+            item.subscriptionId !== request.subscriptionId ||
+            item.billingPeriod !== request.billingPeriod ||
+            item.requestCode !== request.requestCode
+        )
+    ].slice(0, 100);
+
+    savePendingInvoiceRequests();
+}
+
+function consumePendingInvoiceRequest(request) {
+    pendingInvoiceRequests = pendingInvoiceRequests.map(item => {
+        if (item.subscriptionId === request.subscriptionId &&
+            item.billingPeriod === request.billingPeriod &&
+            item.requestCode === request.requestCode) {
+            return {
+                ...item,
+                consumed: true,
+                consumedAt: Date.now()
+            };
+        }
+
+        return item;
+    });
+
+    savePendingInvoiceRequests();
 }
 
 function addSwapHistory(entry) {
@@ -356,7 +525,7 @@ function setView(view) {
 }
 
 function requiresConnection(view) {
-    return ["home", "receive", "pay", "swap"].includes(view);
+    return ["home", "receive", "pay", "swap", "scheduler"].includes(view);
 }
 
 function setConnectedUi(isConnected) {
@@ -384,6 +553,87 @@ function clearWalletInfo() {
     text("settingsWalletPubkey", "-");
     setEmptyList("transactionList", "Connect a wallet to see Lightning activity.");
     renderSwapHistory();
+    renderScheduler();
+}
+
+function startAppMessages() {
+    stopAppMessages();
+
+    if (!connection?.secret || !connection?.relayUrl) {
+        return;
+    }
+
+    appMessages = new NostrPaymentMessages({
+        privateKey: connection.secret,
+        relays: [connection.relayUrl],
+        timeoutMs: 15000
+    });
+
+    appMessages.onMessage(handleSchedulerMessage);
+    appMessages.onError(error => {
+        console.warn("Scheduler message error:", error);
+        if (currentView === "scheduler") {
+            status("schedulerStatus", error?.message || String(error), "error");
+        }
+    });
+    appMessages.subscribe();
+    text("schedulerCustomerPubkey", shorten(appMessages.pubkey, 16, 16));
+}
+
+function stopAppMessages() {
+    try {
+        appMessages?.close();
+    } catch (err) {
+        console.warn(err);
+    }
+
+    appMessages = null;
+    text("schedulerCustomerPubkey", "-");
+}
+
+async function handleSchedulerMessage(message) {
+    if (message.type !== "subscription.invoice_response") {
+        return;
+    }
+
+    const response = message.payload || {};
+    const pending = pendingInvoiceRequests.find(item =>
+        item.subscriptionId === response.subscriptionId &&
+        item.billingPeriod === response.billingPeriod &&
+        item.requestCode === response.requestCode &&
+        !item.consumed
+    );
+
+    if (!pending) {
+        status("schedulerStatus", "Invoice response ignored: no matching request.", "error");
+        return;
+    }
+
+    const validation = validateSubscriptionInvoiceResponse({
+        response,
+        pendingRequest: pending
+    });
+
+    if (!validation.ok) {
+        status("schedulerStatus", validation.errors.join(" "), "error");
+        return;
+    }
+
+    consumePendingInvoiceRequest(pending);
+    const subscription = subscriptions.find(item => item.subscriptionId === response.subscriptionId);
+    if (subscription) {
+        upsertSubscription({
+            ...subscription,
+            lastInvoice: response.invoice,
+            lastInvoiceAt: Date.now(),
+            status: "invoice_ready"
+        });
+    }
+
+    value("payInvoiceInput", response.invoice);
+    updatePayInvoicePreview(response.invoice);
+    status("schedulerStatus", "Invoice response validated. Review it in Pay.", "success");
+    setView("pay");
 }
 
 async function refreshBalance() {
@@ -423,7 +673,7 @@ function renderTransactions(transactions) {
         const sign = type === "outgoing" ? "-" : "+";
         list.appendChild(createHistoryItem({
             title: type === "outgoing" ? "Sent payment" : "Received payment",
-            meta: `${formatTime(tx.settled_at || tx.created_at)} · ${shorten(tx.payment_hash || tx.invoice || "", 8, 8)}`,
+            meta: `${formatTime(tx.settled_at || tx.created_at)} - ${shorten(tx.payment_hash || tx.invoice || "", 8, 8)}`,
             amount: `${sign}${formatSats(tx.amount)}`,
             amountType: type,
             statusText: tx.settled === false ? "pending" : "settled"
@@ -444,12 +694,105 @@ function renderSwapHistory() {
     swapHistory.forEach(swap => {
         list.appendChild(createHistoryItem({
             title: swap.direction === "lightning_to_onchain" ? "Lightning to BTC" : "BTC to Lightning",
-            meta: `${new Date(swap.createdAt).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })} · ${shorten(swap.swapId, 8, 8)}`,
+            meta: `${new Date(swap.createdAt).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })} - ${shorten(swap.swapId, 8, 8)}`,
             amount: formatSats(swap.amountSats),
             amountType: swap.direction === "lightning_to_onchain" ? "outgoing" : "incoming",
             statusText: swap.status || "pending"
         }));
     });
+}
+
+function renderScheduler() {
+    renderContactList();
+    renderSubscriptionList();
+}
+
+function renderContactList() {
+    const list = $("contactList");
+    if (!list) return;
+
+    list.innerHTML = "";
+    if (!contacts.length) {
+        setEmptyList("contactList", "No contacts yet.");
+        return;
+    }
+
+    contacts.slice(0, 6).forEach(contact => {
+        list.appendChild(createHistoryItem({
+            title: contact.displayName || "Merchant",
+            meta: `${contact.role || "merchant"} - ${shorten(contact.pubkey, 10, 10)}`,
+            amount: contact.verified ? "verified" : "saved",
+            amountType: contact.verified ? "incoming" : "",
+            statusText: contact.source || "contact"
+        }));
+    });
+}
+
+function renderSubscriptionList() {
+    const list = $("subscriptionList");
+    if (!list) return;
+
+    list.innerHTML = "";
+    if (!subscriptions.length) {
+        setEmptyList("subscriptionList", "No subscriptions yet.");
+        return;
+    }
+
+    subscriptions.forEach(subscription => {
+        const merchant = contacts.find(item => item.pubkey === subscription.merchantPubkey);
+        const item = createHistoryItem({
+            title: merchant?.displayName || subscription.description || "Subscription",
+            meta: `${subscription.billingPeriod || "-"} - ${shorten(subscription.subscriptionId, 8, 8)}`,
+            amount: formatSats(subscription.amountSats),
+            amountType: "outgoing",
+            statusText: subscription.status || "active"
+        });
+
+        item.addEventListener("click", () => selectSubscription(subscription.subscriptionId));
+        list.appendChild(item);
+    });
+}
+
+function selectSubscription(subscriptionId) {
+    const subscription = subscriptions.find(item => item.subscriptionId === subscriptionId);
+    if (!subscription) return;
+
+    value("schedulerMerchantPubkeyInput", subscription.merchantPubkey || "");
+    value("schedulerMerchantNameInput", getContactName(subscription.merchantPubkey));
+    value("schedulerSubscriptionIdInput", subscription.subscriptionId || "");
+    value("schedulerAmountInput", subscription.amountSats || "");
+    value("schedulerIntervalInput", subscription.interval || "monthly");
+    value("schedulerNextDueInput", subscription.nextDueDate || todayIsoDate());
+    value("schedulerBillingPeriodInput", subscription.billingPeriod || "");
+    value("schedulerDescriptionInput", subscription.description || "");
+    status("schedulerStatus", "Subscription loaded.", "success");
+}
+
+function getContactName(pubkey) {
+    return contacts.find(item => item.pubkey === pubkey)?.displayName || "";
+}
+
+function getCustomerPubkey() {
+    return appMessages?.pubkey || "";
+}
+
+function syncBillingPeriod(force = false) {
+    const interval = $("schedulerIntervalInput")?.value || "monthly";
+    if (interval === "custom" && !force) return;
+
+    const dueDate = $("schedulerNextDueInput")?.value || todayIsoDate();
+    const current = $("schedulerBillingPeriodInput")?.value.trim();
+
+    if (force || !current || interval !== "custom") {
+        value("schedulerBillingPeriodInput", generateBillingPeriod(interval, dueDate));
+    }
+}
+
+function setDefaultSchedulerDates() {
+    if (!$("schedulerNextDueInput")?.value) {
+        value("schedulerNextDueInput", todayIsoDate());
+    }
+    syncBillingPeriod(false);
 }
 
 async function refreshSwapHistory() {
@@ -488,7 +831,7 @@ async function connectWallet() {
     const raw = $("nwcInput").value.trim();
 
     if (!raw) {
-        status("nwcStringStatus", "Paste an NWC string.", "error");
+        status("nwcStringStatus", "Paste a wallet connection string.", "error");
         return;
     }
 
@@ -521,14 +864,14 @@ async function requestHostedWallet() {
             throw new Error("Wallet order was not created.");
         }
 
-        status("nwcStringStatus", "Provisioning NWC string...");
+        status("nwcStringStatus", "Provisioning wallet connection...");
 
         const statusResponse = await fetch(`${billingApiBaseUrl}/orders/${orderId}`);
         const result = await readApiResponse(statusResponse);
         const nwcString = result?.nostrWalletConnect || "";
 
         if (!nwcString) {
-            throw new Error("NWC string was not returned by the server.");
+            throw new Error("Wallet connection was not returned by the server.");
         }
 
         value("nwcInput", nwcString);
@@ -557,6 +900,7 @@ async function connectWithString(raw, saveConnection) {
         });
 
         await client.connect();
+        startAppMessages();
         const info = await client.getInfo();
         await refreshHomeData();
 
@@ -575,7 +919,7 @@ async function connectWithString(raw, saveConnection) {
 
         setConnectedUi(true);
         clearStatus("settingsStatus");
-        status("nwcStringStatus", "NWC string saved.", "success");
+        status("nwcStringStatus", "Wallet connection saved.", "success");
         setView("home");
     } catch (err) {
         console.error(err);
@@ -595,6 +939,7 @@ async function disconnectWallet() {
         console.warn(err);
     }
 
+    stopAppMessages();
     client = null;
     connection = null;
     clearWalletInfo();
@@ -636,6 +981,134 @@ async function createInvoice() {
     } catch (err) {
         console.error(err);
         status("receiveStatus", err?.message || String(err), "error");
+    }
+}
+
+function saveSchedulerSubscription() {
+    if (!appMessages) {
+        status("schedulerStatus", "Connect your wallet first.", "error");
+        setView("nwc-string");
+        return false;
+    }
+
+    syncBillingPeriod(false);
+
+    const merchantPubkey = $("schedulerMerchantPubkeyInput").value.trim();
+    const merchantName = $("schedulerMerchantNameInput").value.trim();
+    const subscriptionId = $("schedulerSubscriptionIdInput").value.trim() || `sub_${Date.now()}`;
+    const amountSats = Number($("schedulerAmountInput").value);
+    const interval = $("schedulerIntervalInput").value || "monthly";
+    const nextDueDateValue = $("schedulerNextDueInput").value || todayIsoDate();
+    const billingPeriod = $("schedulerBillingPeriodInput").value.trim();
+    const description = $("schedulerDescriptionInput").value.trim();
+
+    if (!/^[0-9a-fA-F]{64}$/.test(merchantPubkey)) {
+        status("schedulerStatus", "Merchant pubkey must be a 64-char hex key.", "error");
+        return false;
+    }
+
+    if (!Number.isFinite(amountSats) || amountSats <= 0) {
+        status("schedulerStatus", "Enter a valid amount.", "error");
+        return false;
+    }
+
+    if (!billingPeriod) {
+        status("schedulerStatus", "Billing period is required.", "error");
+        return false;
+    }
+
+    upsertContact({
+        pubkey: merchantPubkey,
+        role: "merchant",
+        displayName: merchantName || "Merchant",
+        relayUrls: connection?.relayUrl ? [connection.relayUrl] : [],
+        source: "manual",
+        createdAt: Date.now()
+    });
+
+    upsertSubscription({
+        subscriptionId,
+        merchantPubkey,
+        customerPubkey: appMessages.pubkey,
+        amountSats: Math.round(amountSats),
+        maxAmountSats: Math.round(amountSats),
+        interval,
+        nextDueDate: nextDueDateValue,
+        billingPeriod,
+        description: description || "Recurring payment",
+        status: "active",
+        paymentPolicy: "manual_confirm",
+        createdAt: Date.now()
+    });
+
+    value("schedulerSubscriptionIdInput", subscriptionId);
+    status("schedulerStatus", "Subscription saved.", "success");
+    return true;
+}
+
+async function sendSchedulerInvoiceRequest() {
+    if (!appMessages) {
+        status("schedulerStatus", "Connect your wallet first.", "error");
+        setView("nwc-string");
+        return;
+    }
+
+    if (!saveSchedulerSubscription()) {
+        return;
+    }
+
+    const merchantPubkey = $("schedulerMerchantPubkeyInput").value.trim();
+    const subscriptionId = $("schedulerSubscriptionIdInput").value.trim();
+    const amountSatsExpected = Number($("schedulerAmountInput").value);
+    const interval = $("schedulerIntervalInput").value || "monthly";
+    const nextDueDateValue = $("schedulerNextDueInput").value || todayIsoDate();
+    const billingPeriod = $("schedulerBillingPeriodInput").value.trim();
+
+    if (!subscriptionId || !merchantPubkey || !billingPeriod) {
+        status("schedulerStatus", "Save the subscription first.", "error");
+        return;
+    }
+
+    try {
+        const requestCode = generateInvoiceRequestCode();
+        const createdAt = new Date();
+        const expiresAt = new Date(createdAt.getTime() + 15 * 60 * 1000);
+        const payload = {
+            subscriptionId,
+            merchantPubkey,
+            customerPubkey: appMessages.pubkey,
+            billingPeriod,
+            requestCode,
+            amountSatsExpected: Math.round(amountSatsExpected),
+            createdAt: createdAt.toISOString(),
+            expiresAt: expiresAt.toISOString()
+        };
+
+        status("schedulerStatus", "Sending invoice request...");
+        await appMessages.send({
+            recipientPubkey: merchantPubkey,
+            type: "subscription.invoice_request",
+            payload
+        });
+
+        addPendingInvoiceRequest(payload);
+        const subscription = subscriptions.find(item => item.subscriptionId === subscriptionId);
+        if (subscription && interval !== "custom") {
+            upsertSubscription({
+                ...subscription,
+                lastRequestedBillingPeriod: billingPeriod,
+                lastInvoiceRequestedAt: Date.now(),
+                nextDueDate: nextDueDate(interval, nextDueDateValue),
+                billingPeriod: generateBillingPeriod(interval, nextDueDate(interval, nextDueDateValue))
+            });
+            value("schedulerNextDueInput", nextDueDate(interval, nextDueDateValue));
+            value("schedulerBillingPeriodInput", generateBillingPeriod(interval, nextDueDate(interval, nextDueDateValue)));
+        }
+        status("schedulerStatus", `Invoice request sent. Code ${shorten(requestCode, 8, 8)}`, "success");
+        renderScheduler();
+    } catch (err) {
+        console.error(err);
+        status("schedulerStatus", err?.message || String(err), "error");
     }
 }
 
@@ -681,7 +1154,7 @@ async function createForwardSwap() {
 
     if (!hasEasyCryptoSendSwapAccess()) {
         updateSwapAccessGate("swap");
-        status("swapStatus", "Swaps are available only with a Nostr key generated by easycryptosend.it.", "error");
+        status("swapStatus", "This feature requires an EasyCryptoSend swap-enabled connection.", "error");
         return;
     }
 
@@ -734,7 +1207,7 @@ async function createReverseSwap() {
 
     if (!hasEasyCryptoSendSwapAccess()) {
         updateSwapAccessGate("swap");
-        status("swapStatus", "Swaps are available only with a Nostr key generated by easycryptosend.it.", "error");
+        status("swapStatus", "This feature requires an EasyCryptoSend swap-enabled connection.", "error");
         return;
     }
 
@@ -1023,7 +1496,7 @@ function restoreSavedConnection() {
 }
 
 function forgetConnection() {
-    const confirmed = window.confirm("Forget the saved NWC string and disconnect this wallet?");
+    const confirmed = window.confirm("Forget the saved wallet connection and disconnect this wallet?");
     if (!confirmed) {
         return;
     }
@@ -1061,6 +1534,14 @@ function wireEvents() {
     });
     $("refreshTransactionsButton").addEventListener("click", refreshTransactions);
     $("refreshSwapsButton").addEventListener("click", refreshSwapHistory);
+    $("saveSchedulerButton").addEventListener("click", saveSchedulerSubscription);
+    $("requestSubscriptionInvoiceButton").addEventListener("click", sendSchedulerInvoiceRequest);
+    $("generateBillingPeriodButton").addEventListener("click", () => {
+        syncBillingPeriod(true);
+        status("schedulerStatus", "Billing period generated.", "success");
+    });
+    $("schedulerIntervalInput").addEventListener("change", () => syncBillingPeriod(true));
+    $("schedulerNextDueInput").addEventListener("change", () => syncBillingPeriod(true));
 
     $("createInvoiceButton").addEventListener("click", createInvoice);
     $("payInvoiceButton").addEventListener("click", payInvoice);
@@ -1122,6 +1603,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     showInstallPrompt(isIosDevice() ? "ios" : "browser");
     requestCameraPermissionOnStartup();
     loadSwapHistory();
+    loadSchedulerState();
+    renderScheduler();
+    setDefaultSchedulerDates();
     const savedConnection = restoreSavedConnection();
     clearWalletInfo();
     setConnectedUi(false);

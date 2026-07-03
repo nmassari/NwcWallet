@@ -310,6 +310,30 @@ button:disabled {
     line-height: 1.45;
 }
 
+.tool-card {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 12px;
+    align-items: center;
+    margin: 10px 0 16px;
+    padding: 16px;
+    border: 1px solid var(--line);
+    border-radius: 20px;
+    background: var(--soft-surface-2);
+}
+
+.tool-card strong {
+    display: block;
+    font-size: 14px;
+}
+
+.tool-card p {
+    margin: 5px 0 0;
+    color: var(--muted);
+    font-size: 13px;
+    line-height: 1.4;
+}
+
 .compact-info {
     margin-top: 0;
 }
@@ -616,6 +640,16 @@ button:disabled {
 
 .output-field {
     min-height: 96px;
+}
+
+.compact-textarea {
+    min-height: 86px;
+}
+
+.scheduler-two-col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
 }
 
 .primary-button,
