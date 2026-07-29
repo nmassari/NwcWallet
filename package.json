@@ -15,7 +15,7 @@
   "type": "commonjs",
   "dependencies": {
     "@zxing/browser": "^0.2.0",
-    "nwckit": "^0.1.5"
+    "nwckit": "^0.1.6"
   },
   "devDependencies": {
     "vite": "^8.0.2"

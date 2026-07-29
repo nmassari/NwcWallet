@@ -1127,8 +1127,15 @@ async function payInvoice() {
 
     try {
         status("payStatus", "Paying...");
-        await client.payInvoice({ invoice });
-        status("payStatus", "Payment sent.", "success");
+        const payment = await client.payInvoice({ invoice });
+        const serviceFee = Number(payment?.service_fee_paid || 0);
+        status(
+            "payStatus",
+            serviceFee > 0
+                ? `Payment sent. Service fee ${formatSats(serviceFee)}.`
+                : "Payment sent.",
+            "success"
+        );
         await refreshHomeData();
     } catch (err) {
         console.error(err);
