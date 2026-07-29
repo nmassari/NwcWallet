@@ -1,11 +1,7 @@
-const CACHE_NAME = "nwc-wallet-v6";
-const APP_SHELL = [
+const CACHE_NAME = "nwc-wallet-v7";
+const PRECACHE_URLS = [
   "/",
   "/index.html",
-  "/css/ecs.css",
-  "/js/common.js",
-  "/js/wallet.js",
-  "/js/invoice-qr.js",
   "/manifest.webmanifest",
   "/favicon.gif",
   "/icon-192.png",
@@ -15,7 +11,7 @@ const APP_SHELL = [
 
 self.addEventListener("install", event => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then(cache => cache.addAll(APP_SHELL))
+    caches.open(CACHE_NAME).then(cache => cache.addAll(PRECACHE_URLS))
   );
   self.skipWaiting();
 });
@@ -29,22 +25,26 @@ self.addEventListener("activate", event => {
   self.clients.claim();
 });
 
+self.addEventListener("message", event => {
+  if (event.data?.type === "SKIP_WAITING") {
+    self.skipWaiting();
+  }
+});
+
 self.addEventListener("fetch", event => {
   if (event.request.method !== "GET") return;
+  const requestUrl = new URL(event.request.url);
+  if (requestUrl.origin !== self.location.origin) return;
 
   event.respondWith(
-    fetch(event.request).then(response => {
-      const copy = response.clone();
-      caches.open(CACHE_NAME).then(cache => cache.put(event.request, copy));
-      return response;
-    }).catch(() =>
-      caches.match(event.request).then(cached =>
-        cached || fetch(event.request).then(response => {
+    fetch(event.request, { cache: "no-store" }).then(response => {
+      if (response.ok) {
         const copy = response.clone();
         caches.open(CACHE_NAME).then(cache => cache.put(event.request, copy));
-        return response;
-        })
-      )
+      }
+      return response;
+    }).catch(() =>
+      caches.match(event.request)
     )
   );
 });

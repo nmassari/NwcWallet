@@ -19,7 +19,7 @@ const pendingInvoiceRequestsKey = "nwc_wallet_pending_invoice_requests";
 const installPromptDismissedKey = "nwc_wallet_install_prompt_dismissed";
 const installPromptSnoozedUntilKey = "nwc_wallet_install_prompt_snoozed_until";
 const billingApiBaseUrl = "https://ocb.easycryptosend.it/api/billing";
-const appBuild = "qr-camera-v7-20260521";
+const appBuild = "pwa-v8-20260729";
 const easyCryptoSendHost = "easycryptosend.it";
 const bitcoinOnchainAsset = {
     asset: "BTC",
@@ -1607,6 +1607,7 @@ window.addEventListener("appinstalled", () => {
 
 document.addEventListener("DOMContentLoaded", async () => {
     applyTheme(getInitialTheme());
+    text("settingsAppVersion", appBuild);
     showInstallPrompt(isIosDevice() ? "ios" : "browser");
     requestCameraPermissionOnStartup();
     loadSwapHistory();

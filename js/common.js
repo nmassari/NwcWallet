@@ -10,8 +10,37 @@ if (import.meta.env.DEV && "serviceWorker" in navigator) {
     }
 } else if ("serviceWorker" in navigator) {
     window.addEventListener("load", () => {
-        navigator.serviceWorker.register("/sw.js").catch(err => {
-            console.warn("Service worker registration failed:", err);
+        let refreshing = false;
+
+        navigator.serviceWorker.addEventListener("controllerchange", () => {
+            if (refreshing) return;
+            refreshing = true;
+            window.location.reload();
         });
+
+        navigator.serviceWorker.register("/sw.js", { updateViaCache: "none" })
+            .then(registration => {
+                registration.update().catch(err => {
+                    console.warn("Service worker update check failed:", err);
+                });
+
+                if (registration.waiting) {
+                    registration.waiting.postMessage({ type: "SKIP_WAITING" });
+                }
+
+                registration.addEventListener("updatefound", () => {
+                    const nextWorker = registration.installing;
+                    if (!nextWorker) return;
+
+                    nextWorker.addEventListener("statechange", () => {
+                        if (nextWorker.state === "installed" && navigator.serviceWorker.controller) {
+                            nextWorker.postMessage({ type: "SKIP_WAITING" });
+                        }
+                    });
+                });
+            })
+            .catch(err => {
+                console.warn("Service worker registration failed:", err);
+            });
     });
 }
