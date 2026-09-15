@@ -513,9 +513,34 @@ button:disabled {
     background: var(--soft-surface-2);
 }
 
+.security-row {
+    min-height: 72px;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 12px;
+    align-items: center;
+    padding: 14px 16px;
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    background: var(--soft-surface-2);
+}
+
 .theme-row span {
     color: var(--muted);
     font-size: 14px;
+}
+
+.security-row span {
+    display: block;
+    font-weight: 800;
+}
+
+.security-row small {
+    display: block;
+    margin-top: 4px;
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.35;
 }
 
 .theme-toggle {
@@ -859,6 +884,53 @@ button:disabled {
     font-size: 11px;
     text-align: center;
     opacity: .72;
+}
+
+.device-unlock-overlay {
+    position: fixed;
+    z-index: 30;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    padding: 18px;
+    background: var(--scanner-backdrop);
+    backdrop-filter: blur(16px);
+}
+
+.device-unlock-sheet {
+    width: min(100%, 420px);
+    padding: 24px;
+    border: 1px solid var(--line);
+    border-radius: 28px;
+    background: var(--panel);
+    box-shadow: var(--shadow);
+    text-align: center;
+}
+
+.device-unlock-icon {
+    width: 54px;
+    height: 54px;
+    display: inline-grid;
+    place-items: center;
+    margin-bottom: 16px;
+    border-radius: 18px;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    color: var(--icon-accent-text);
+    font-weight: 900;
+    font-size: 22px;
+}
+
+.device-unlock-sheet h2 {
+    margin: 0;
+    font-size: 26px;
+    line-height: 1.1;
+}
+
+.device-unlock-sheet p {
+    margin: 10px 0 0;
+    color: var(--muted);
+    font-size: 14px;
+    line-height: 1.45;
 }
 
 .swap-access-modal {

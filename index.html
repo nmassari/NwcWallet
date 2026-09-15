@@ -359,6 +359,16 @@
                         <strong id="themeToggleLabel">Dark</strong>
                     </button>
                 </div>
+                <div class="security-row">
+                    <div>
+                        <span>Secure unlock</span>
+                        <small>Face ID, fingerprint, Windows Hello, Touch ID or passkey.</small>
+                    </div>
+                    <button id="deviceUnlockToggleButton" class="theme-toggle" type="button" role="switch" aria-checked="false">
+                        <span id="deviceUnlockToggleKnob" class="theme-toggle-knob"></span>
+                        <strong id="deviceUnlockToggleLabel">Off</strong>
+                    </button>
+                </div>
                 <div class="info-row">
                     <span>Wallet pubkey</span>
                     <strong id="settingsWalletPubkey">-</strong>
@@ -394,6 +404,17 @@
             <video id="qrScannerVideo" class="scanner-video" muted playsinline autoplay></video>
             <div id="qrScannerStatus" class="status-line">Scanner ready.</div>
             <div id="qrScannerBuild" class="scanner-build">qr-camera-v7-20260521</div>
+        </div>
+    </div>
+
+    <div id="deviceUnlockOverlay" class="device-unlock-overlay" hidden role="dialog" aria-labelledby="deviceUnlockTitle" aria-describedby="deviceUnlockText">
+        <div class="device-unlock-sheet">
+            <div class="device-unlock-icon">N</div>
+            <h2 id="deviceUnlockTitle">Unlock NwcWallet</h2>
+            <p id="deviceUnlockText">Use your device secure unlock to open the wallet.</p>
+            <button id="deviceUnlockRetryButton" class="primary-button" type="button">Unlock</button>
+            <button id="deviceUnlockForgetButton" class="secondary-button full-width-action" type="button">Forget saved connection</button>
+            <div id="deviceUnlockStatus" class="status-line"></div>
         </div>
     </div>
 </body>

@@ -18,8 +18,11 @@ const subscriptionsKey = "nwc_wallet_subscriptions";
 const pendingInvoiceRequestsKey = "nwc_wallet_pending_invoice_requests";
 const installPromptDismissedKey = "nwc_wallet_install_prompt_dismissed";
 const installPromptSnoozedUntilKey = "nwc_wallet_install_prompt_snoozed_until";
+const deviceUnlockEnabledKey = "nwc_wallet_device_unlock_enabled";
+const deviceUnlockCredentialKey = "nwc_wallet_device_unlock_credential";
+const deviceUnlockPromptedKey = "nwc_wallet_device_unlock_prompted";
 const billingApiBaseUrl = "https://ocb.easycryptosend.it/api/billing";
-const appBuild = "pwa-v8-20260729";
+const appBuild = "pwa-v10-20260915";
 const easyCryptoSendHost = "easycryptosend.it";
 const bitcoinOnchainAsset = {
     asset: "BTC",
@@ -50,6 +53,7 @@ let swapHistory = [];
 let contacts = [];
 let subscriptions = [];
 let pendingInvoiceRequests = [];
+let deviceUnlockRequestInFlight = false;
 
 function $(id) {
     return document.getElementById(id);
@@ -422,6 +426,257 @@ function applyTheme(theme) {
 function toggleTheme() {
     const currentTheme = document.documentElement.dataset.theme === "light" ? "light" : "dark";
     applyTheme(currentTheme === "light" ? "dark" : "light");
+}
+
+function bytesToBase64Url(bytes) {
+    const binary = Array.from(new Uint8Array(bytes), byte => String.fromCharCode(byte)).join("");
+    return btoa(binary)
+        .replaceAll("+", "-")
+        .replaceAll("/", "_")
+        .replaceAll("=", "");
+}
+
+function base64UrlToBytes(value) {
+    const base64 = value.replaceAll("-", "+").replaceAll("_", "/").padEnd(Math.ceil(value.length / 4) * 4, "=");
+    const binary = atob(base64);
+    return Uint8Array.from(binary, char => char.charCodeAt(0));
+}
+
+function randomBytes(length = 32) {
+    const bytes = new Uint8Array(length);
+    crypto.getRandomValues(bytes);
+    return bytes;
+}
+
+function isDeviceUnlockAvailable() {
+    return window.isSecureContext && !!navigator.credentials && !!window.PublicKeyCredential;
+}
+
+function isDeviceUnlockEnabled() {
+    return localStorage.getItem(deviceUnlockEnabledKey) === "1" && !!localStorage.getItem(deviceUnlockCredentialKey);
+}
+
+function getDeviceUnlockErrorMessage(err) {
+    const message = err?.message || "";
+
+    if (/pending/i.test(message)) {
+        return "Secure unlock is already open. Complete or cancel the system prompt and try again.";
+    }
+
+    if (err?.name === "NotAllowedError") {
+        return "Secure unlock was cancelled or timed out.";
+    }
+
+    if (err?.name === "NotSupportedError") {
+        return "This browser does not support secure unlock on this device.";
+    }
+
+    if (err?.name === "SecurityError") {
+        return "Secure unlock requires HTTPS or localhost.";
+    }
+
+    return message || "Secure unlock failed.";
+}
+
+function getDeviceUnlockCredentialId() {
+    return localStorage.getItem(deviceUnlockCredentialKey) || "";
+}
+
+function getDeviceUnlockLabel() {
+    const ua = window.navigator.userAgent || "";
+    if (/iphone|ipad|ipod|android/i.test(ua)) return "Face ID, fingerprint or passkey";
+    if (/macintosh|mac os x/i.test(ua)) return "Touch ID or passkey";
+    if (/windows/i.test(ua)) return "Windows Hello or passkey";
+    return "Passkey";
+}
+
+function updateDeviceUnlockUi() {
+    const available = isDeviceUnlockAvailable();
+    const enabled = isDeviceUnlockEnabled();
+    const button = $("deviceUnlockToggleButton");
+
+    if (!button) return;
+
+    button.disabled = !available || deviceUnlockRequestInFlight;
+    button.setAttribute("aria-checked", String(enabled));
+    text("deviceUnlockToggleLabel", deviceUnlockRequestInFlight ? "..." : enabled ? "On" : available ? "Off" : "No");
+}
+
+async function createDeviceUnlockCredential() {
+    const userId = randomBytes(32);
+    const credential = await navigator.credentials.create({
+        publicKey: {
+            challenge: randomBytes(32),
+            rp: {
+                name: "NwcWallet"
+            },
+            user: {
+                id: userId,
+                name: "nwcwallet-local-user",
+                displayName: "NwcWallet"
+            },
+            pubKeyCredParams: [
+                { type: "public-key", alg: -7 },
+                { type: "public-key", alg: -257 }
+            ],
+            authenticatorSelection: {
+                residentKey: "preferred",
+                userVerification: "required"
+            },
+            attestation: "none",
+            timeout: 60000
+        }
+    });
+
+    if (!credential?.rawId) {
+        throw new Error("Secure unlock was not created.");
+    }
+
+    localStorage.setItem(deviceUnlockCredentialKey, bytesToBase64Url(credential.rawId));
+    localStorage.setItem(`${deviceUnlockCredentialKey}_user`, bytesToBase64Url(userId));
+    localStorage.setItem(deviceUnlockEnabledKey, "1");
+    localStorage.setItem(deviceUnlockPromptedKey, "1");
+}
+
+async function requestDeviceUnlock(statusId = "settingsStatus") {
+    if (deviceUnlockRequestInFlight) {
+        throw new Error("Secure unlock is already open. Complete or cancel the system prompt and try again.");
+    }
+
+    const credentialId = getDeviceUnlockCredentialId();
+    if (!credentialId) {
+        throw new Error("Secure unlock is not configured.");
+    }
+
+    deviceUnlockRequestInFlight = true;
+    updateDeviceUnlockUi();
+
+    try {
+        const credential = await navigator.credentials.get({
+            publicKey: {
+                challenge: randomBytes(32),
+                allowCredentials: [{
+                    type: "public-key",
+                    id: base64UrlToBytes(credentialId)
+                }],
+                userVerification: "required",
+                timeout: 60000
+            }
+        });
+
+        if (!credential) {
+            throw new Error("Secure unlock was cancelled.");
+        }
+
+        status(statusId, "Unlocked.", "success");
+    } finally {
+        deviceUnlockRequestInFlight = false;
+        updateDeviceUnlockUi();
+    }
+}
+
+async function enableDeviceUnlock(statusId = "settingsStatus") {
+    if (deviceUnlockRequestInFlight) {
+        status(statusId, "Secure unlock is already open. Complete or cancel the system prompt and try again.", "error");
+        return false;
+    }
+
+    if (!isDeviceUnlockAvailable()) {
+        status(statusId, "Secure unlock requires HTTPS, localhost and a browser with passkey support.", "error");
+        updateDeviceUnlockUi();
+        return false;
+    }
+
+    try {
+        deviceUnlockRequestInFlight = true;
+        updateDeviceUnlockUi();
+        status(statusId, `Creating secure unlock with ${getDeviceUnlockLabel()}...`);
+        await createDeviceUnlockCredential();
+        status(statusId, "Secure unlock enabled.", "success");
+        return true;
+    } catch (err) {
+        console.error(err);
+        status(statusId, getDeviceUnlockErrorMessage(err), "error");
+        return false;
+    } finally {
+        deviceUnlockRequestInFlight = false;
+        updateDeviceUnlockUi();
+    }
+}
+
+async function disableDeviceUnlock(statusId = "settingsStatus") {
+    const confirmed = window.confirm("Disable secure unlock for this device?");
+    if (!confirmed) {
+        return false;
+    }
+
+    localStorage.removeItem(deviceUnlockEnabledKey);
+    localStorage.removeItem(deviceUnlockCredentialKey);
+    localStorage.removeItem(`${deviceUnlockCredentialKey}_user`);
+    localStorage.setItem(deviceUnlockPromptedKey, "1");
+    updateDeviceUnlockUi();
+    status(statusId, "Secure unlock disabled.", "success");
+    return true;
+}
+
+async function toggleDeviceUnlock() {
+    if (isDeviceUnlockEnabled()) {
+        await disableDeviceUnlock("settingsStatus");
+    } else {
+        await enableDeviceUnlock("settingsStatus");
+    }
+}
+
+async function maybeOfferDeviceUnlock() {
+    if (!client || isDeviceUnlockEnabled() || localStorage.getItem(deviceUnlockPromptedKey) || !isDeviceUnlockAvailable()) {
+        return;
+    }
+
+    const accepted = window.confirm(`Enable secure unlock for NwcWallet with ${getDeviceUnlockLabel()}?`);
+    localStorage.setItem(deviceUnlockPromptedKey, "1");
+
+    if (accepted) {
+        await enableDeviceUnlock("settingsStatus");
+    }
+}
+
+function showDeviceUnlockOverlay(message = "") {
+    const overlay = $("deviceUnlockOverlay");
+    if (!overlay) return;
+
+    text("deviceUnlockText", `Use ${getDeviceUnlockLabel()} to open the wallet.`);
+    status("deviceUnlockStatus", message, message ? "error" : "info");
+    overlay.hidden = false;
+}
+
+function hideDeviceUnlockOverlay() {
+    const overlay = $("deviceUnlockOverlay");
+    if (overlay) overlay.hidden = true;
+    clearStatus("deviceUnlockStatus");
+}
+
+async function unlockSavedConnectionBeforeConnect() {
+    if (!isDeviceUnlockEnabled()) {
+        return true;
+    }
+
+    if (!isDeviceUnlockAvailable()) {
+        showDeviceUnlockOverlay("Secure unlock is not available in this browser. Use Settings after reconnecting to disable it.");
+        return false;
+    }
+
+    showDeviceUnlockOverlay();
+
+    try {
+        status("deviceUnlockStatus", "Waiting for secure unlock...");
+        await requestDeviceUnlock("deviceUnlockStatus");
+        hideDeviceUnlockOverlay();
+        return true;
+    } catch (err) {
+        console.error(err);
+        showDeviceUnlockOverlay(getDeviceUnlockErrorMessage(err));
+        return false;
+    }
 }
 
 function isStandaloneMode() {
@@ -921,6 +1176,10 @@ async function connectWithString(raw, saveConnection) {
         clearStatus("settingsStatus");
         status("nwcStringStatus", "Wallet connection saved.", "success");
         setView("home");
+
+        if (saveConnection) {
+            await maybeOfferDeviceUnlock();
+        }
     } catch (err) {
         console.error(err);
         client = null;
@@ -1509,7 +1768,12 @@ function forgetConnection() {
     }
 
     localStorage.removeItem(savedConnectionKey);
+    localStorage.removeItem(deviceUnlockEnabledKey);
+    localStorage.removeItem(deviceUnlockCredentialKey);
+    localStorage.removeItem(`${deviceUnlockCredentialKey}_user`);
     value("nwcInput", "");
+    updateDeviceUnlockUi();
+    hideDeviceUnlockOverlay();
     disconnectWallet();
     status("settingsStatus", "Connection forgotten.", "success");
     setView("nwc-string");
@@ -1588,6 +1852,15 @@ function wireEvents() {
     $("settingsClearConnectionButton").addEventListener("click", forgetConnection);
     $("closeScannerButton").addEventListener("click", closeScanner);
     $("themeToggleButton").addEventListener("click", toggleTheme);
+    $("deviceUnlockToggleButton").addEventListener("click", toggleDeviceUnlock);
+    $("deviceUnlockRetryButton").addEventListener("click", async () => {
+        const savedConnection = restoreSavedConnection();
+        const unlocked = await unlockSavedConnectionBeforeConnect();
+        if (unlocked && savedConnection) {
+            await connectWithString(savedConnection, false);
+        }
+    });
+    $("deviceUnlockForgetButton").addEventListener("click", forgetConnection);
     $("installAppButton").addEventListener("click", installPwa);
     $("dismissInstallButton").addEventListener("click", dismissInstallPrompt);
 }
@@ -1615,6 +1888,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     renderScheduler();
     setDefaultSchedulerDates();
     const savedConnection = restoreSavedConnection();
+    updateDeviceUnlockUi();
     clearWalletInfo();
     setConnectedUi(false);
     setSwapMode("forward");
@@ -1623,7 +1897,10 @@ document.addEventListener("DOMContentLoaded", async () => {
     wireEvents();
 
     if (savedConnection) {
-        await connectWithString(savedConnection, false);
+        const unlocked = await unlockSavedConnectionBeforeConnect();
+        if (unlocked) {
+            await connectWithString(savedConnection, false);
+        }
     } else {
         setView("nwc-string");
     }
