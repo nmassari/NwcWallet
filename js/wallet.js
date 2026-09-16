@@ -22,7 +22,7 @@ const deviceUnlockEnabledKey = "nwc_wallet_device_unlock_enabled";
 const deviceUnlockCredentialKey = "nwc_wallet_device_unlock_credential";
 const deviceUnlockPromptedKey = "nwc_wallet_device_unlock_prompted";
 const billingApiBaseUrl = "https://ocb.easycryptosend.it/api/billing";
-const appBuild = "pwa-v10-20260915";
+const appBuild = "pwa-v11-20260916";
 const easyCryptoSendHost = "easycryptosend.it";
 const bitcoinOnchainAsset = {
     asset: "BTC",
@@ -151,6 +151,11 @@ async function readApiResponse(response) {
 function shorten(input, start = 10, end = 8) {
     if (!input) return "-";
     return input.length <= start + end + 3 ? input : `${input.slice(0, start)}...${input.slice(-end)}`;
+}
+
+function extractEmail(input) {
+    const match = String(input || "").match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
+    return match?.[0] || "";
 }
 
 function formatSats(amount) {
@@ -801,7 +806,7 @@ function setConnectedUi(isConnected) {
 
 function clearWalletInfo() {
     text("walletBalance", "-");
-    text("walletAlias", "NWC wallet");
+    text("walletAlias", "");
     text("walletRelay", "-");
     text("walletPubkey", "-");
     text("settingsRelay", "-");
@@ -1166,7 +1171,7 @@ async function connectWithString(raw, saveConnection) {
         text("walletPubkey", shorten(pubkey));
         text("settingsRelay", relay);
         text("settingsWalletPubkey", shorten(pubkey, 16, 16));
-        text("walletAlias", info?.alias || "NWC wallet");
+        text("walletAlias", extractEmail(info?.alias));
 
         if (saveConnection) {
             localStorage.setItem(savedConnectionKey, raw);

@@ -1,6 +1,6 @@
 {
   "name": "nwc-wallet",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "NwcWallet PWA",
   "main": "index.js",
   "scripts": {
