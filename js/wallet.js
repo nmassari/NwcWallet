@@ -36,6 +36,12 @@ const bitcoinLightningAsset = {
     network: "mainnet",
     rail: "lightning"
 };
+const usdtTaprootAsset = {
+    asset: "USDT",
+    chain: "bitcoin",
+    network: "mainnet",
+    rail: "taproot-assets"
+};
 
 let client = null;
 let appMessages = null;
@@ -1414,6 +1420,73 @@ function setSwapMode(mode) {
 
     $("forwardSwapPanel").hidden = mode !== "forward";
     $("reverseSwapPanel").hidden = mode !== "reverse";
+    updateSwapAssetUi();
+}
+
+function getForwardReceiveAssetKey() {
+    return $("forwardReceiveAssetSelect")?.value || "btc_lightning";
+}
+
+function getReverseSendAssetKey() {
+    return $("reverseSendAssetSelect")?.value || "btc_lightning";
+}
+
+function getForwardReceiveAsset() {
+    return getForwardReceiveAssetKey() === "usdt_taproot"
+        ? usdtTaprootAsset
+        : bitcoinLightningAsset;
+}
+
+function getReverseSendAsset() {
+    return getReverseSendAssetKey() === "usdt_taproot"
+        ? usdtTaprootAsset
+        : bitcoinLightningAsset;
+}
+
+function buildForwardSwapRequest(amount, destination) {
+    const receiveAsset = getForwardReceiveAsset();
+    const isUsdt = receiveAsset.asset === "USDT";
+
+    return {
+        direction: isUsdt ? "onchain_to_taproot_assets" : "onchain_to_lightning",
+        sendAsset: bitcoinOnchainAsset,
+        receiveAsset,
+        amount: satsAmount(amount),
+        ...(isUsdt
+            ? { receiveAddress: destination }
+            : { receiveInvoice: destination })
+    };
+}
+
+function buildReverseSwapRequest(amount, destinationAddress) {
+    const sendAsset = getReverseSendAsset();
+    const isUsdt = sendAsset.asset === "USDT";
+
+    return {
+        direction: isUsdt ? "taproot_assets_to_onchain" : "lightning_to_onchain",
+        sendAsset,
+        receiveAsset: bitcoinOnchainAsset,
+        amount: isUsdt ? { value: String(amount), unit: "usdt" } : satsAmount(amount),
+        receiveAddress: destinationAddress
+    };
+}
+
+function updateSwapAssetUi() {
+    const forwardIsUsdt = getForwardReceiveAssetKey() === "usdt_taproot";
+    const reverseIsUsdt = getReverseSendAssetKey() === "usdt_taproot";
+
+    text("swapDestinationLabel", forwardIsUsdt ? "USDT Taproot address" : "Lightning invoice");
+    text("swapDestinationLoadedLabel", forwardIsUsdt ? "USDT address loaded" : "Invoice loaded");
+    $("swapInvoiceInput").placeholder = forwardIsUsdt ? "taprt..." : "lnbc...";
+    $("swapInvoiceQrImage").alt = forwardIsUsdt ? "USDT Taproot address QR" : "Swap invoice QR";
+    text("reverseSwapAmountLabel", reverseIsUsdt ? "Amount USDT" : "Amount sats");
+    $("reverseSwapAmountInput").min = reverseIsUsdt ? "0.01" : "25000";
+    if (reverseIsUsdt && Number($("reverseSwapAmountInput").value) >= 25000) {
+        value("reverseSwapAmountInput", "1");
+    }
+    if (!reverseIsUsdt && Number($("reverseSwapAmountInput").value) < 25000) {
+        value("reverseSwapAmountInput", "25000");
+    }
 }
 
 async function createForwardSwap() {
@@ -1430,34 +1503,31 @@ async function createForwardSwap() {
     }
 
     const amount = Number($("swapAmountInput").value);
-    const invoice = $("swapInvoiceInput").value.trim();
+    const destination = $("swapInvoiceInput").value.trim();
+    const receiveAsset = getForwardReceiveAsset();
+    const isUsdt = receiveAsset.asset === "USDT";
 
     if (!Number.isFinite(amount) || amount < 25000) {
         status("swapStatus", "Minimum 25000 sats.", "error");
         return;
     }
 
-    if (!invoice) {
-        status("swapStatus", "Invoice required.", "error");
+    if (!destination) {
+        status("swapStatus", isUsdt ? "USDT Taproot address required." : "Invoice required.", "error");
         return;
     }
 
     try {
         status("swapStatus", "Creating swap...");
-        const swap = await client.createSwap({
-            direction: "onchain_to_lightning",
-            sendAsset: bitcoinOnchainAsset,
-            receiveAsset: bitcoinLightningAsset,
-            amount: satsAmount(amount),
-            receiveInvoice: invoice
-        });
+        const swap = await client.createSwap(buildForwardSwapRequest(amount, destination));
 
         lastSwapDepositAddress = swap.depositAddress || "";
         addSwapHistory({
             swapId: swap.swapId,
-            direction: "onchain_to_lightning",
+            direction: swap.direction || (isUsdt ? "onchain_to_taproot_assets" : "onchain_to_lightning"),
             amountSats: amount,
             status: swap.status || "pending",
+            receiveAsset: receiveAsset.asset,
             depositAddress: lastSwapDepositAddress
         });
         value("swapAddressOutput", lastSwapDepositAddress);
@@ -1484,9 +1554,11 @@ async function createReverseSwap() {
 
     const amount = Number($("reverseSwapAmountInput").value);
     const address = $("reverseSwapAddressInput").value.trim();
+    const sendAsset = getReverseSendAsset();
+    const isUsdt = sendAsset.asset === "USDT";
 
-    if (!Number.isFinite(amount) || amount < 25000) {
-        status("swapStatus", "Minimum 25000 sats.", "error");
+    if (!Number.isFinite(amount) || amount <= 0 || (!isUsdt && amount < 25000)) {
+        status("swapStatus", isUsdt ? "Amount must be positive." : "Minimum 25000 sats.", "error");
         return;
     }
 
@@ -1497,20 +1569,15 @@ async function createReverseSwap() {
 
     try {
         status("swapStatus", "Creating withdrawal...");
-        const swap = await client.createSwap({
-            direction: "lightning_to_onchain",
-            sendAsset: bitcoinLightningAsset,
-            receiveAsset: bitcoinOnchainAsset,
-            amount: satsAmount(amount),
-            receiveAddress: address
-        });
+        const swap = await client.createSwap(buildReverseSwapRequest(amount, address));
 
         const invoice = swap.invoice || "";
         addSwapHistory({
             swapId: swap.swapId,
-            direction: "lightning_to_onchain",
+            direction: swap.direction || (isUsdt ? "taproot_assets_to_onchain" : "lightning_to_onchain"),
             amountSats: amount,
             status: swap.status || "pending",
+            sendAsset: sendAsset.asset,
             lockupAddress: swap.lockupAddress || "",
             invoice
         });
@@ -1823,6 +1890,8 @@ function wireEvents() {
     $("payInvoiceButton").addEventListener("click", payInvoice);
     $("createForwardSwapButton").addEventListener("click", createForwardSwap);
     $("createReverseSwapButton").addEventListener("click", createReverseSwap);
+    $("forwardReceiveAssetSelect").addEventListener("change", updateSwapAssetUi);
+    $("reverseSendAssetSelect").addEventListener("change", updateSwapAssetUi);
     $("pasteNwcStringButton").addEventListener("click", () => pasteInto("nwcInput", "nwcStringStatus"));
     $("pastePayInvoiceButton").addEventListener("click", () => pasteInto("payInvoiceInput", "payStatus"));
     $("pasteSwapInvoiceButton").addEventListener("click", () => pasteInto("swapInvoiceInput", "swapStatus"));

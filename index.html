@@ -183,12 +183,17 @@
             </div>
 
             <div id="forwardSwapPanel">
+                <label class="field-label" for="forwardReceiveAssetSelect">Receive asset</label>
+                <select id="forwardReceiveAssetSelect" class="field">
+                    <option value="btc_lightning">BTC Lightning</option>
+                    <option value="usdt_taproot">USDT Taproot Assets</option>
+                </select>
                 <label class="field-label" for="swapAmountInput">Amount sats</label>
                 <input id="swapAmountInput" class="field" type="number" min="25000" value="25000" />
-                <label class="field-label" for="swapInvoiceInput">Lightning invoice</label>
+                <label id="swapDestinationLabel" class="field-label" for="swapInvoiceInput">Lightning invoice</label>
                 <textarea id="swapInvoiceInput" class="field textarea" spellcheck="false" placeholder="lnbc..."></textarea>
                 <div id="swapInvoiceSummary" class="invoice-summary" hidden>
-                    <span>Invoice loaded</span>
+                    <span id="swapDestinationLoadedLabel">Invoice loaded</span>
                     <strong id="swapInvoiceShort">-</strong>
                 </div>
                 <div id="swapInvoiceQrWrap" class="qr-wrap" hidden>
@@ -212,7 +217,12 @@
             </div>
 
             <div id="reverseSwapPanel" hidden>
-                <label class="field-label" for="reverseSwapAmountInput">Amount sats</label>
+                <label class="field-label" for="reverseSendAssetSelect">Send asset</label>
+                <select id="reverseSendAssetSelect" class="field">
+                    <option value="btc_lightning">BTC Lightning</option>
+                    <option value="usdt_taproot">USDT Taproot Assets</option>
+                </select>
+                <label id="reverseSwapAmountLabel" class="field-label" for="reverseSwapAmountInput">Amount sats</label>
                 <input id="reverseSwapAmountInput" class="field" type="number" min="25000" value="25000" />
                 <label class="field-label" for="reverseSwapAddressInput">Bitcoin address</label>
                 <textarea id="reverseSwapAddressInput" class="field textarea" spellcheck="false" placeholder="bc1..."></textarea>
