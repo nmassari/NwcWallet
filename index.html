@@ -175,19 +175,27 @@
                 </div>
             </div>
             <div class="segmented-control" aria-label="Swap direction">
-                <button class="segment active" type="button" data-swap-mode="forward">BTC to Lightning</button>
-                <button class="segment" type="button" data-swap-mode="reverse">Lightning to BTC</button>
+                <button class="segment active" type="button" data-swap-mode="forward">Deposit</button>
+                <button class="segment" type="button" data-swap-mode="reverse">Withdraw</button>
             </div>
             <div class="context-note">
                 Swaps are experimental and require Lightning liquidity. Route failures can happen while the node is still growing.
             </div>
 
             <div id="forwardSwapPanel">
-                <label class="field-label" for="forwardReceiveAssetSelect">Receive asset</label>
-                <select id="forwardReceiveAssetSelect" class="field">
-                    <option value="btc_lightning">BTC Lightning</option>
-                    <option value="usdt_taproot">USDT Taproot Assets</option>
-                </select>
+                <div class="swap-route-grid" aria-label="Deposit route">
+                    <div class="route-cell">
+                        <span>From</span>
+                        <strong>BTC on-chain</strong>
+                    </div>
+                    <label class="route-cell route-select" for="forwardReceiveAssetSelect">
+                        <span>To</span>
+                        <select id="forwardReceiveAssetSelect" class="route-field" autocomplete="off">
+                            <option value="btc_lightning">BTC Lightning</option>
+                            <option value="usdt_taproot">USDT Taproot Assets</option>
+                        </select>
+                    </label>
+                </div>
                 <label class="field-label" for="swapAmountInput">Amount sats</label>
                 <input id="swapAmountInput" class="field" type="number" min="25000" value="25000" />
                 <label id="swapDestinationLabel" class="field-label" for="swapInvoiceInput">Lightning invoice</label>
@@ -217,11 +225,19 @@
             </div>
 
             <div id="reverseSwapPanel" hidden>
-                <label class="field-label" for="reverseSendAssetSelect">Send asset</label>
-                <select id="reverseSendAssetSelect" class="field">
-                    <option value="btc_lightning">BTC Lightning</option>
-                    <option value="usdt_taproot">USDT Taproot Assets</option>
-                </select>
+                <div class="swap-route-grid" aria-label="Withdraw route">
+                    <label class="route-cell route-select" for="reverseSendAssetSelect">
+                        <span>From</span>
+                        <select id="reverseSendAssetSelect" class="route-field" autocomplete="off">
+                            <option value="btc_lightning">BTC Lightning</option>
+                            <option value="usdt_taproot">USDT Taproot Assets</option>
+                        </select>
+                    </label>
+                    <div class="route-cell">
+                        <span>To</span>
+                        <strong>BTC on-chain</strong>
+                    </div>
+                </div>
                 <label id="reverseSwapAmountLabel" class="field-label" for="reverseSwapAmountInput">Amount sats</label>
                 <input id="reverseSwapAmountInput" class="field" type="number" min="25000" value="25000" />
                 <label class="field-label" for="reverseSwapAddressInput">Bitcoin address</label>

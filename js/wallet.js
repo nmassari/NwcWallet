@@ -1489,6 +1489,12 @@ function updateSwapAssetUi() {
     }
 }
 
+function resetSwapAssetDefaults() {
+    value("forwardReceiveAssetSelect", "btc_lightning");
+    value("reverseSendAssetSelect", "btc_lightning");
+    updateSwapAssetUi();
+}
+
 async function createForwardSwap() {
     if (!client) {
         status("swapStatus", "Wallet not connected.", "error");
@@ -1966,6 +1972,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     clearWalletInfo();
     setConnectedUi(false);
     setSwapMode("forward");
+    resetSwapAssetDefaults();
     $("copyCreatedInvoiceButton").disabled = true;
     $("useCreatedInvoiceButton").disabled = true;
     wireEvents();
