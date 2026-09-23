@@ -174,47 +174,49 @@
                     <p id="swapAccessText">This feature requires an EasyCryptoSend swap-enabled connection.</p>
                 </div>
             </div>
-            <div class="segmented-control" aria-label="Swap direction">
-                <button class="segment active" type="button" data-swap-mode="forward">Deposit</button>
-                <button class="segment" type="button" data-swap-mode="reverse">Withdraw</button>
+            <div id="assetPickerModal" class="asset-picker-modal" hidden role="dialog" aria-modal="true" aria-labelledby="assetPickerTitle">
+                <div class="asset-picker-card">
+                    <div class="asset-picker-head">
+                        <h2 id="assetPickerTitle">Select asset</h2>
+                        <button id="closeAssetPickerButton" class="icon-button asset-picker-close" type="button" aria-label="Close asset picker">×</button>
+                    </div>
+                    <div id="assetPickerList" class="asset-picker-list"></div>
+                </div>
             </div>
             <div class="context-note">
                 Swaps are experimental and require Lightning liquidity. Route failures can happen while the node is still growing.
             </div>
 
             <div id="forwardSwapPanel">
-                <div class="swap-route-grid" aria-label="Deposit route">
-                    <div class="route-cell">
-                        <span>From</span>
-                        <strong>BTC on-chain</strong>
-                    </div>
-                    <label class="route-cell route-select" for="forwardReceiveAssetSelect">
-                        <span>To</span>
-                        <select id="forwardReceiveAssetSelect" class="route-field" autocomplete="off">
-                            <option value="btc_lightning">BTC Lightning</option>
-                            <option value="usdt_taproot">USDT Taproot Assets</option>
-                        </select>
-                    </label>
+                <div class="swap-route-grid" aria-label="Swap route">
+                    <button id="swapSendAssetButton" class="route-cell route-button" type="button" data-asset-picker="send">
+                        <span>Send</span>
+                        <strong id="swapSendAssetLabel">BTC</strong>
+                    </button>
+                    <button id="swapReceiveAssetButton" class="route-cell route-button" type="button" data-asset-picker="receive">
+                        <span>Receive</span>
+                        <strong id="swapReceiveAssetLabel">LNBTC</strong>
+                    </button>
                 </div>
-                <label class="field-label" for="swapAmountInput">Amount sats</label>
+                <label id="swapAmountLabel" class="field-label" for="swapAmountInput">Amount sats</label>
                 <input id="swapAmountInput" class="field" type="number" min="25000" value="25000" />
                 <label id="swapDestinationLabel" class="field-label" for="swapInvoiceInput">Lightning invoice</label>
                 <textarea id="swapInvoiceInput" class="field textarea" spellcheck="false" placeholder="lnbc..."></textarea>
                 <div id="swapInvoiceSummary" class="invoice-summary" hidden>
-                    <span id="swapDestinationLoadedLabel">Invoice loaded</span>
+                    <span id="swapDestinationLoadedLabel">Destination loaded</span>
                     <strong id="swapInvoiceShort">-</strong>
                 </div>
                 <div id="swapInvoiceQrWrap" class="qr-wrap" hidden>
-                    <img id="swapInvoiceQrImage" class="qr-image" alt="Swap invoice QR" />
+                    <img id="swapInvoiceQrImage" class="qr-image" alt="Swap destination QR" />
                 </div>
                 <div class="button-row">
                     <button id="createForwardSwapButton" class="primary-button" type="button">Create swap</button>
                     <button id="pasteSwapInvoiceButton" class="secondary-button" type="button">Paste</button>
                     <button class="secondary-button" type="button" data-scan-target="swapInvoiceInput" data-scan-status="swapStatus">Scan</button>
                 </div>
-                <label class="field-label" for="swapAddressOutput">Deposit address</label>
+                <label class="field-label" for="swapAddressOutput">Swap result</label>
                 <div id="swapAddressSummary" class="invoice-summary" hidden>
-                    <span>Deposit address ready</span>
+                    <span>Swap result ready</span>
                     <strong id="swapAddressShort">-</strong>
                 </div>
                 <div id="swapAddressQrWrap" class="qr-wrap" hidden>

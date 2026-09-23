@@ -42,6 +42,62 @@ const usdtTaprootAsset = {
     network: "mainnet",
     rail: "taproot-assets"
 };
+const usdtLightningAsset = {
+    asset: "USDT",
+    chain: "bitcoin",
+    network: "mainnet",
+    rail: "taproot-assets-lightning"
+};
+const swapAssetChoices = {
+    btc_onchain: {
+        label: "BTC",
+        name: "Bitcoin",
+        icon: "₿",
+        destinationLabel: "Bitcoin address",
+        destinationPlaceholder: "bc1...",
+        loadedLabel: "Bitcoin address loaded",
+        amountUnit: "sat",
+        minAmount: 25000,
+        defaultAmount: "25000",
+        asset: bitcoinOnchainAsset
+    },
+    btc_lightning: {
+        label: "LNBTC",
+        name: "Lightning BTC",
+        icon: "⚡︎",
+        destinationLabel: "Lightning invoice",
+        destinationPlaceholder: "lnbc...",
+        loadedLabel: "Lightning invoice loaded",
+        amountUnit: "sat",
+        minAmount: 25000,
+        defaultAmount: "25000",
+        asset: bitcoinLightningAsset
+    },
+    usdt_taproot: {
+        label: "USDT",
+        name: "Taproot Assets",
+        icon: "$",
+        destinationLabel: "USDT Taproot address",
+        destinationPlaceholder: "taprt...",
+        loadedLabel: "USDT Taproot address loaded",
+        amountUnit: "usdt",
+        minAmount: 0.01,
+        defaultAmount: "1",
+        asset: usdtTaprootAsset
+    },
+    usdt_lightning: {
+        label: "LNUSDT",
+        name: "USDT Lightning",
+        icon: "₮",
+        destinationLabel: "USDT Lightning invoice",
+        destinationPlaceholder: "ln...",
+        loadedLabel: "USDT Lightning invoice loaded",
+        amountUnit: "usdt",
+        minAmount: 0.01,
+        defaultAmount: "1",
+        asset: usdtLightningAsset
+    }
+};
 
 let client = null;
 let appMessages = null;
@@ -60,6 +116,9 @@ let contacts = [];
 let subscriptions = [];
 let pendingInvoiceRequests = [];
 let deviceUnlockRequestInFlight = false;
+let swapSendAssetKey = "btc_onchain";
+let swapReceiveAssetKey = "btc_lightning";
+let activeAssetPickerSide = "send";
 
 function $(id) {
     return document.getElementById(id);
@@ -958,10 +1017,16 @@ function renderSwapHistory() {
     }
 
     swapHistory.forEach(swap => {
+        const title = swap.sendAsset && swap.receiveAsset
+            ? `${swap.sendAsset} to ${swap.receiveAsset}`
+            : swap.direction === "lightning_to_onchain" ? "Lightning to BTC" : "BTC to Lightning";
+        const amount = swap.amountUnit === "usdt"
+            ? `${swap.amountSats} USDT`
+            : formatSats(swap.amountSats);
         list.appendChild(createHistoryItem({
-            title: swap.direction === "lightning_to_onchain" ? "Lightning to BTC" : "BTC to Lightning",
+            title,
             meta: `${new Date(swap.createdAt).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })} - ${shorten(swap.swapId, 8, 8)}`,
-            amount: formatSats(swap.amountSats),
+            amount,
             amountType: swap.direction === "lightning_to_onchain" ? "outgoing" : "incoming",
             statusText: swap.status || "pending"
         }));
@@ -1418,81 +1483,139 @@ function setSwapMode(mode) {
         button.classList.toggle("active", button.dataset.swapMode === mode);
     });
 
-    $("forwardSwapPanel").hidden = mode !== "forward";
-    $("reverseSwapPanel").hidden = mode !== "reverse";
+    $("forwardSwapPanel").hidden = false;
+    $("reverseSwapPanel").hidden = true;
     updateSwapAssetUi();
 }
 
-function getForwardReceiveAssetKey() {
-    return $("forwardReceiveAssetSelect")?.value || "btc_lightning";
+function getSwapSendKey() {
+    return swapSendAssetKey;
 }
 
-function getReverseSendAssetKey() {
-    return $("reverseSendAssetSelect")?.value || "btc_lightning";
+function getSwapReceiveKey() {
+    return swapReceiveAssetKey;
 }
 
-function getForwardReceiveAsset() {
-    return getForwardReceiveAssetKey() === "usdt_taproot"
-        ? usdtTaprootAsset
-        : bitcoinLightningAsset;
+function getSwapChoice(key) {
+    return swapAssetChoices[key] || swapAssetChoices.btc_lightning;
 }
 
-function getReverseSendAsset() {
-    return getReverseSendAssetKey() === "usdt_taproot"
-        ? usdtTaprootAsset
-        : bitcoinLightningAsset;
+function getSwapDirection(sendKey, receiveKey) {
+    if (sendKey === "btc_onchain" && receiveKey === "btc_lightning") return "onchain_to_lightning";
+    if (sendKey === "btc_lightning" && receiveKey === "btc_onchain") return "lightning_to_onchain";
+    return `${sendKey}_to_${receiveKey}`;
 }
 
-function buildForwardSwapRequest(amount, destination) {
-    const receiveAsset = getForwardReceiveAsset();
-    const isUsdt = receiveAsset.asset === "USDT";
+function routeUsesInvoice(receiveKey) {
+    return receiveKey === "btc_lightning" || receiveKey === "usdt_lightning";
+}
 
-    return {
-        direction: isUsdt ? "onchain_to_taproot_assets" : "onchain_to_lightning",
-        sendAsset: bitcoinOnchainAsset,
-        receiveAsset,
-        amount: satsAmount(amount),
-        ...(isUsdt
-            ? { receiveAddress: destination }
-            : { receiveInvoice: destination })
+function buildSwapRequest(amount, destination) {
+    const sendKey = getSwapSendKey();
+    const receiveKey = getSwapReceiveKey();
+    const send = getSwapChoice(sendKey);
+    const receive = getSwapChoice(receiveKey);
+    const request = {
+        direction: getSwapDirection(sendKey, receiveKey),
+        sendAsset: send.asset,
+        receiveAsset: receive.asset,
+        amount: send.amountUnit === "sat" ? satsAmount(amount) : { value: String(amount), unit: "usdt" }
     };
+
+    if (routeUsesInvoice(receiveKey)) {
+        request.receiveInvoice = destination;
+    } else {
+        request.receiveAddress = destination;
+    }
+
+    return request;
 }
 
-function buildReverseSwapRequest(amount, destinationAddress) {
-    const sendAsset = getReverseSendAsset();
-    const isUsdt = sendAsset.asset === "USDT";
-
-    return {
-        direction: isUsdt ? "taproot_assets_to_onchain" : "lightning_to_onchain",
-        sendAsset,
-        receiveAsset: bitcoinOnchainAsset,
-        amount: isUsdt ? { value: String(amount), unit: "usdt" } : satsAmount(amount),
-        receiveAddress: destinationAddress
-    };
+function syncSwapAssetState(changedSide = "send") {
+    if (swapSendAssetKey === swapReceiveAssetKey) {
+        const replacement = Object.keys(swapAssetChoices).find(key => key !== (changedSide === "send" ? swapSendAssetKey : swapReceiveAssetKey));
+        if (changedSide === "send") {
+            swapReceiveAssetKey = replacement || "btc_lightning";
+        } else {
+            swapSendAssetKey = replacement || "btc_onchain";
+        }
+    }
 }
 
-function updateSwapAssetUi() {
-    const forwardIsUsdt = getForwardReceiveAssetKey() === "usdt_taproot";
-    const reverseIsUsdt = getReverseSendAssetKey() === "usdt_taproot";
+function updateSwapAssetUi(changedSide = "send") {
+    syncSwapAssetState(changedSide);
 
-    text("swapDestinationLabel", forwardIsUsdt ? "USDT Taproot address" : "Lightning invoice");
-    text("swapDestinationLoadedLabel", forwardIsUsdt ? "USDT address loaded" : "Invoice loaded");
-    $("swapInvoiceInput").placeholder = forwardIsUsdt ? "taprt..." : "lnbc...";
-    $("swapInvoiceQrImage").alt = forwardIsUsdt ? "USDT Taproot address QR" : "Swap invoice QR";
-    text("reverseSwapAmountLabel", reverseIsUsdt ? "Amount USDT" : "Amount sats");
-    $("reverseSwapAmountInput").min = reverseIsUsdt ? "0.01" : "25000";
-    if (reverseIsUsdt && Number($("reverseSwapAmountInput").value) >= 25000) {
-        value("reverseSwapAmountInput", "1");
+    const sendKey = getSwapSendKey();
+    const receiveKey = getSwapReceiveKey();
+    const send = getSwapChoice(sendKey);
+    const receive = getSwapChoice(receiveKey);
+
+    text("swapSendAssetLabel", send.label);
+    text("swapReceiveAssetLabel", receive.label);
+    text("swapAmountLabel", send.amountUnit === "sat" ? "Amount sats" : "Amount USDT");
+    $("swapAmountInput").min = String(send.minAmount);
+    if (!Number.isFinite(Number($("swapAmountInput").value)) || Number($("swapAmountInput").value) < send.minAmount) {
+        value("swapAmountInput", send.defaultAmount);
     }
-    if (!reverseIsUsdt && Number($("reverseSwapAmountInput").value) < 25000) {
-        value("reverseSwapAmountInput", "25000");
-    }
+
+    text("swapDestinationLabel", receive.destinationLabel);
+    text("swapDestinationLoadedLabel", receive.loadedLabel);
+    $("swapInvoiceInput").placeholder = receive.destinationPlaceholder;
+    $("swapInvoiceQrImage").alt = `${receive.label} destination QR`;
 }
 
 function resetSwapAssetDefaults() {
-    value("forwardReceiveAssetSelect", "btc_lightning");
-    value("reverseSendAssetSelect", "btc_lightning");
-    updateSwapAssetUi();
+    swapSendAssetKey = "btc_onchain";
+    swapReceiveAssetKey = "btc_lightning";
+    updateSwapAssetUi("send");
+}
+
+function openAssetPicker(side) {
+    activeAssetPickerSide = side === "receive" ? "receive" : "send";
+    const blockedKey = activeAssetPickerSide === "send" ? swapReceiveAssetKey : swapSendAssetKey;
+    const currentKey = activeAssetPickerSide === "send" ? swapSendAssetKey : swapReceiveAssetKey;
+
+    text("assetPickerTitle", activeAssetPickerSide === "send" ? "Select send asset" : "Select receive asset");
+
+    const list = $("assetPickerList");
+    list.innerHTML = "";
+
+    Object.entries(swapAssetChoices).forEach(([key, choice]) => {
+        if (key === blockedKey) return;
+
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = `asset-picker-option${key === currentKey ? " active" : ""}`;
+        button.dataset.assetKey = key;
+        button.innerHTML = `
+            <span class="asset-picker-icon">${choice.icon}</span>
+            <span class="asset-picker-copy">
+                <strong>${choice.label}</strong>
+                <small>${choice.name}</small>
+            </span>
+        `;
+        button.addEventListener("click", () => chooseAsset(key));
+        list.appendChild(button);
+    });
+
+    $("assetPickerModal").hidden = false;
+}
+
+function closeAssetPicker() {
+    $("assetPickerModal").hidden = true;
+}
+
+function chooseAsset(key) {
+    if (!swapAssetChoices[key]) return;
+
+    if (activeAssetPickerSide === "send") {
+        swapSendAssetKey = key;
+    } else {
+        swapReceiveAssetKey = key;
+    }
+
+    updateSwapAssetUi(activeAssetPickerSide);
+    closeAssetPicker();
 }
 
 async function createForwardSwap() {
@@ -1510,35 +1633,41 @@ async function createForwardSwap() {
 
     const amount = Number($("swapAmountInput").value);
     const destination = $("swapInvoiceInput").value.trim();
-    const receiveAsset = getForwardReceiveAsset();
-    const isUsdt = receiveAsset.asset === "USDT";
+    const sendKey = getSwapSendKey();
+    const receiveKey = getSwapReceiveKey();
+    const send = getSwapChoice(sendKey);
+    const receive = getSwapChoice(receiveKey);
 
-    if (!Number.isFinite(amount) || amount < 25000) {
-        status("swapStatus", "Minimum 25000 sats.", "error");
+    if (!Number.isFinite(amount) || amount < send.minAmount) {
+        status("swapStatus", send.amountUnit === "sat" ? "Minimum 25000 sats." : "Amount must be positive.", "error");
         return;
     }
 
     if (!destination) {
-        status("swapStatus", isUsdt ? "USDT Taproot address required." : "Invoice required.", "error");
+        status("swapStatus", `${receive.destinationLabel} required.`, "error");
         return;
     }
 
     try {
         status("swapStatus", "Creating swap...");
-        const swap = await client.createSwap(buildForwardSwapRequest(amount, destination));
+        const swap = await client.createSwap(buildSwapRequest(amount, destination));
 
-        lastSwapDepositAddress = swap.depositAddress || "";
+        const resultValue = swap.depositAddress || swap.invoice || "";
+        lastSwapDepositAddress = resultValue;
         addSwapHistory({
             swapId: swap.swapId,
-            direction: swap.direction || (isUsdt ? "onchain_to_taproot_assets" : "onchain_to_lightning"),
+            direction: swap.direction || getSwapDirection(sendKey, receiveKey),
             amountSats: amount,
+            amountUnit: send.amountUnit,
             status: swap.status || "pending",
-            receiveAsset: receiveAsset.asset,
-            depositAddress: lastSwapDepositAddress
+            sendAsset: send.label,
+            receiveAsset: receive.label,
+            depositAddress: swap.depositAddress || "",
+            invoice: swap.invoice || ""
         });
-        value("swapAddressOutput", lastSwapDepositAddress);
-        updateSwapAddressPreview(lastSwapDepositAddress, swap.bip21 || lastSwapDepositAddress);
-        status("swapStatus", "Deposit address ready.", "success");
+        value("swapAddressOutput", resultValue);
+        updateSwapAddressPreview(resultValue, swap.bip21 || resultValue);
+        status("swapStatus", resultValue ? "Swap instructions ready." : "Swap created.", "success");
     } catch (err) {
         console.error(err);
         status("swapStatus", err?.message || String(err), "error");
@@ -1896,8 +2025,12 @@ function wireEvents() {
     $("payInvoiceButton").addEventListener("click", payInvoice);
     $("createForwardSwapButton").addEventListener("click", createForwardSwap);
     $("createReverseSwapButton").addEventListener("click", createReverseSwap);
-    $("forwardReceiveAssetSelect").addEventListener("change", updateSwapAssetUi);
-    $("reverseSendAssetSelect").addEventListener("change", updateSwapAssetUi);
+    $("swapSendAssetButton").addEventListener("click", () => openAssetPicker("send"));
+    $("swapReceiveAssetButton").addEventListener("click", () => openAssetPicker("receive"));
+    $("closeAssetPickerButton").addEventListener("click", closeAssetPicker);
+    $("assetPickerModal").addEventListener("click", event => {
+        if (event.target === $("assetPickerModal")) closeAssetPicker();
+    });
     $("pasteNwcStringButton").addEventListener("click", () => pasteInto("nwcInput", "nwcStringStatus"));
     $("pastePayInvoiceButton").addEventListener("click", () => pasteInto("payInvoiceInput", "payStatus"));
     $("pasteSwapInvoiceButton").addEventListener("click", () => pasteInto("swapInvoiceInput", "swapStatus"));
