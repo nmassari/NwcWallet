@@ -118,6 +118,8 @@ let pendingInvoiceRequests = [];
 let deviceUnlockRequestInFlight = false;
 let swapSendAssetKey = "btc_onchain";
 let swapReceiveAssetKey = "btc_lightning";
+let activeBalanceAsset = "LNBTC";
+let walletAssetBalances = [];
 let activeAssetPickerSide = "send";
 
 function $(id) {
@@ -872,6 +874,8 @@ function setConnectedUi(isConnected) {
 function clearWalletInfo() {
     text("walletBalance", "-");
     text("walletAlias", "");
+    walletAssetBalances = [];
+    renderSelectedBalance();
     text("walletRelay", "-");
     text("walletPubkey", "-");
     text("settingsRelay", "-");
@@ -964,8 +968,76 @@ async function handleSchedulerMessage(message) {
 async function refreshBalance() {
     if (!client) return;
 
+    walletAssetBalances = await loadAssetBalances();
+    renderSelectedBalance();
+}
+
+async function loadAssetBalances() {
+    try {
+        const result = await client.request("get_asset_balances", {});
+        if (Array.isArray(result?.balances)) {
+            return result.balances;
+        }
+    } catch (err) {
+        console.warn("Asset balances unavailable, falling back to get_balance.", err);
+    }
+
     const balance = await client.getBalance();
-    text("walletBalance", `${balance.balance} sats`);
+    return [
+        {
+            asset: "LNBTC",
+            unit: "sat",
+            balance: String(balance.balance),
+            available: String(balance.balance),
+            status: "active"
+        },
+        {
+            asset: "LNUSDT",
+            unit: "USDT",
+            balance: "0",
+            available: "0",
+            status: "unavailable"
+        }
+    ];
+}
+
+function renderSelectedBalance() {
+    document.querySelectorAll("[data-balance-asset]").forEach(button => {
+        const active = button.dataset.balanceAsset === activeBalanceAsset;
+        button.classList.toggle("active", active);
+        button.setAttribute("aria-selected", active ? "true" : "false");
+    });
+
+    const selected = walletAssetBalances.find(item => item.asset === activeBalanceAsset);
+    if (!selected) {
+        text("walletBalance", "-");
+        text("walletAlias", activeBalanceAsset === "LNUSDT" ? "USDT Lightning wallet" : "");
+        return;
+    }
+
+    if (selected.status && selected.status !== "active") {
+        text("walletBalance", "Not active");
+        text("walletAlias", activeBalanceAsset === "LNUSDT" ? "USDT Lightning is not enabled yet" : selected.status);
+        return;
+    }
+
+    const unit = selected.unit || (selected.asset === "LNBTC" ? "sat" : "USDT");
+    const amount = selected.balance ?? selected.available ?? "0";
+    text("walletBalance", `${formatBalanceAmount(amount, unit)} ${unit}`);
+    text("walletAlias", selected.asset === "LNUSDT" ? "USDT Lightning wallet" : "");
+}
+
+function formatBalanceAmount(amount, unit) {
+    const raw = String(amount ?? "0");
+    if (unit === "sat") {
+        const value = Number(raw);
+        return Number.isFinite(value) ? Math.trunc(value).toLocaleString("en-US") : raw;
+    }
+
+    const value = Number(raw);
+    return Number.isFinite(value)
+        ? value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 6 })
+        : raw;
 }
 
 async function refreshTransactions() {
@@ -1993,6 +2065,13 @@ function wireEvents() {
 
     document.querySelectorAll("[data-swap-mode]").forEach(button => {
         button.addEventListener("click", () => setSwapMode(button.dataset.swapMode));
+    });
+
+    document.querySelectorAll("[data-balance-asset]").forEach(button => {
+        button.addEventListener("click", () => {
+            activeBalanceAsset = button.dataset.balanceAsset || "LNBTC";
+            renderSelectedBalance();
+        });
     });
 
     document.querySelectorAll("[data-scan-target]").forEach(button => {

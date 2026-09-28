@@ -271,10 +271,46 @@ button:disabled {
     box-shadow: var(--shadow);
 }
 
+.balance-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: auto;
+}
+
 .balance-label,
 .balance-meta {
     color: var(--muted);
     font-size: 14px;
+}
+
+.balance-tabs {
+    display: inline-flex;
+    gap: 4px;
+    padding: 4px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--soft-surface);
+}
+
+.balance-tab {
+    min-width: 68px;
+    min-height: 32px;
+    padding: 0 10px;
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--muted);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 800;
+    cursor: pointer;
+}
+
+.balance-tab.active {
+    background: var(--accent);
+    color: var(--icon-accent-text);
 }
 
 .balance-value {

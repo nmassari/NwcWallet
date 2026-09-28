@@ -39,7 +39,13 @@
 
         <section class="app-view active" data-view="home">
             <div class="balance-card">
-                <div class="balance-label">Balance</div>
+                <div class="balance-head">
+                    <div class="balance-label">Lightning balance</div>
+                    <div class="balance-tabs" role="tablist" aria-label="Lightning asset balance">
+                        <button class="balance-tab active" type="button" data-balance-asset="LNBTC" role="tab" aria-selected="true">LNBTC</button>
+                        <button class="balance-tab" type="button" data-balance-asset="LNUSDT" role="tab" aria-selected="false">LNUSDT</button>
+                    </div>
+                </div>
                 <div id="walletBalance" class="balance-value">-</div>
                 <div id="walletAlias" class="balance-meta"></div>
             </div>
