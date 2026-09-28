@@ -1024,7 +1024,7 @@ function renderSelectedBalance() {
     const unit = selected.unit || (selected.asset === "LNBTC" ? "sat" : "USDT");
     const amount = selected.balance ?? selected.available ?? "0";
     text("walletBalance", `${formatBalanceAmount(amount, unit)} ${unit}`);
-    text("walletAlias", selected.asset === "LNUSDT" ? "USDT Lightning wallet" : "");
+    text("walletAlias", "");
 }
 
 function formatBalanceAmount(amount, unit) {
