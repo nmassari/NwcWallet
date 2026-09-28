@@ -974,7 +974,7 @@ async function refreshBalance() {
 
 async function loadAssetBalances() {
     try {
-        const result = await client.request("get_asset_balances", {});
+        const result = await client.request("get_taproot_asset_balances", {});
         if (Array.isArray(result?.balances)) {
             return result.balances;
         }
