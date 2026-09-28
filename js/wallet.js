@@ -1013,7 +1013,7 @@ function renderSelectedBalance() {
     const selected = walletAssetBalances.find(item => item.asset === activeBalanceAsset);
     if (!selected) {
         text("walletBalance", "-");
-        text("walletAlias", activeBalanceAsset === "LNUSDT" ? "USDT Lightning wallet" : "");
+        text("walletAlias", "");
         return;
     }
 
