@@ -120,6 +120,8 @@ let swapSendAssetKey = "btc_onchain";
 let swapReceiveAssetKey = "btc_lightning";
 let activeBalanceAsset = "LNBTC";
 let walletAssetBalances = [];
+let receiveAsset = "LNBTC";
+let payAsset = "LNBTC";
 let activeAssetPickerSide = "send";
 
 function $(id) {
@@ -1371,10 +1373,17 @@ async function createInvoice() {
 
     try {
         status("receiveStatus", "Creating invoice...");
-        const result = await client.makeInvoice({
-            amount,
-            description: memo || "NwcWallet invoice"
-        });
+        const result = receiveAsset === "LNUSDT"
+            ? await client.request("make_taproot_asset_invoice", {
+                asset: "LNUSDT",
+                amount,
+                unit: "USDT",
+                description: memo || "NwcWallet USDT invoice"
+            })
+            : await client.makeInvoice({
+                amount,
+                description: memo || "NwcWallet invoice"
+            });
 
         lastCreatedInvoice = result?.invoice || "";
         InvoiceQr.update("createdInvoiceQrWrap", "createdInvoiceQrImage", lastCreatedInvoice);
@@ -1534,7 +1543,12 @@ async function payInvoice() {
 
     try {
         status("payStatus", "Paying...");
-        const payment = await client.payInvoice({ invoice });
+        const payment = payAsset === "LNUSDT"
+            ? await client.request("pay_taproot_asset_invoice", {
+                asset: "LNUSDT",
+                invoice
+            })
+            : await client.payInvoice({ invoice });
         const serviceFee = Number(payment?.service_fee_paid || 0);
         status(
             "payStatus",
@@ -1548,6 +1562,45 @@ async function payInvoice() {
         console.error(err);
         status("payStatus", err?.message || String(err), "error");
     }
+}
+
+function setReceiveAsset(asset) {
+    receiveAsset = asset === "LNUSDT" ? "LNUSDT" : "LNBTC";
+    document.querySelectorAll("[data-receive-asset]").forEach(button => {
+        const active = button.dataset.receiveAsset === receiveAsset;
+        button.classList.toggle("active", active);
+        button.setAttribute("aria-selected", active ? "true" : "false");
+    });
+
+    text("receiveAmountLabel", receiveAsset === "LNUSDT" ? "Amount USDT" : "Amount sats");
+    $("receiveAmountInput").min = receiveAsset === "LNUSDT" ? "0.01" : "1";
+    $("receiveAmountInput").step = receiveAsset === "LNUSDT" ? "0.01" : "1";
+    if (receiveAsset === "LNUSDT" && Number($("receiveAmountInput").value) >= 1000) {
+        value("receiveAmountInput", "1.00");
+    }
+    if (receiveAsset === "LNBTC" && Number($("receiveAmountInput").value) < 1) {
+        value("receiveAmountInput", "1000");
+    }
+    text("createdInvoiceShort", "-");
+    lastCreatedInvoice = "";
+    InvoiceQr.update("createdInvoiceQrWrap", "createdInvoiceQrImage", "");
+    $("createdInvoiceSummary").hidden = true;
+    $("copyCreatedInvoiceButton").disabled = true;
+    $("useCreatedInvoiceButton").disabled = true;
+    status("receiveStatus", "");
+}
+
+function setPayAsset(asset) {
+    payAsset = asset === "LNUSDT" ? "LNUSDT" : "LNBTC";
+    document.querySelectorAll("[data-pay-asset]").forEach(button => {
+        const active = button.dataset.payAsset === payAsset;
+        button.classList.toggle("active", active);
+        button.setAttribute("aria-selected", active ? "true" : "false");
+    });
+
+    text("payInvoiceLabel", payAsset === "LNUSDT" ? "USDT Lightning invoice" : "Lightning invoice");
+    $("payInvoiceInput").placeholder = payAsset === "LNUSDT" ? "ln..." : "lnbc...";
+    status("payStatus", "");
 }
 
 function setSwapMode(mode) {
@@ -2072,6 +2125,14 @@ function wireEvents() {
             activeBalanceAsset = button.dataset.balanceAsset || "LNBTC";
             renderSelectedBalance();
         });
+    });
+
+    document.querySelectorAll("[data-receive-asset]").forEach(button => {
+        button.addEventListener("click", () => setReceiveAsset(button.dataset.receiveAsset));
+    });
+
+    document.querySelectorAll("[data-pay-asset]").forEach(button => {
+        button.addEventListener("click", () => setPayAsset(button.dataset.payAsset));
     });
 
     document.querySelectorAll("[data-scan-target]").forEach(button => {

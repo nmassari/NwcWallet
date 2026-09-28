@@ -126,7 +126,11 @@
             <div class="view-head">
                 <h1>Receive</h1>
             </div>
-            <label class="field-label" for="receiveAmountInput">Amount sats</label>
+            <div class="balance-tabs receive-pay-tabs" role="tablist" aria-label="Receive asset">
+                <button class="balance-tab active" type="button" data-receive-asset="LNBTC" role="tab" aria-selected="true">LNBTC</button>
+                <button class="balance-tab" type="button" data-receive-asset="LNUSDT" role="tab" aria-selected="false">LNUSDT</button>
+            </div>
+            <label id="receiveAmountLabel" class="field-label" for="receiveAmountInput">Amount sats</label>
             <input id="receiveAmountInput" class="field" type="number" min="1" value="1000" />
             <label class="field-label" for="receiveMemoInput">Memo</label>
             <input id="receiveMemoInput" class="field" type="text" value="NwcWallet invoice" />
@@ -149,7 +153,11 @@
             <div class="view-head">
                 <h1>Pay</h1>
             </div>
-            <label class="field-label" for="payInvoiceInput">Lightning invoice</label>
+            <div class="balance-tabs receive-pay-tabs" role="tablist" aria-label="Pay asset">
+                <button class="balance-tab active" type="button" data-pay-asset="LNBTC" role="tab" aria-selected="true">LNBTC</button>
+                <button class="balance-tab" type="button" data-pay-asset="LNUSDT" role="tab" aria-selected="false">LNUSDT</button>
+            </div>
+            <label id="payInvoiceLabel" class="field-label" for="payInvoiceInput">Lightning invoice</label>
             <textarea id="payInvoiceInput" class="field textarea" spellcheck="false" placeholder="lnbc..."></textarea>
             <div id="payInvoiceSummary" class="invoice-summary" hidden>
                 <span>Invoice loaded</span>
