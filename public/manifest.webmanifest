@@ -1,7 +1,7 @@
 {
   "name": "NwcWallet",
   "short_name": "NwcWallet",
-  "description": "A PWA wallet for Lightning payments and Bitcoin swaps via Nostr Wallet Connect.",
+  "description": "A browser-first PWA for Bitcoin and Lightning using client-owned Nostr Wallet Connect credentials.",
   "start_url": "/",
   "scope": "/",
   "id": "/",
