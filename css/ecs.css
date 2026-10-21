@@ -635,6 +635,40 @@ button:disabled {
     font-size: 13px;
 }
 
+.settings-action-group {
+    display: grid;
+    gap: 12px;
+    margin: 14px 0;
+    padding: 16px;
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    background: var(--soft-surface-3);
+}
+
+.settings-action-group strong,
+.settings-action-group small {
+    display: block;
+}
+
+.settings-action-group small {
+    margin-top: 5px;
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.4;
+}
+
+.backup-password-sheet {
+    max-height: calc(100vh - 36px);
+    overflow-y: auto;
+    text-align: left;
+}
+
+.backup-password-sheet .device-unlock-icon,
+.backup-password-sheet h2,
+.backup-password-sheet > p {
+    text-align: center;
+}
+
 .info-row span {
     color: var(--muted);
     font-size: 14px;

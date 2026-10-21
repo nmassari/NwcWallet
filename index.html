@@ -424,6 +424,17 @@
                     <strong id="settingsAppVersion">-</strong>
                 </div>
             </div>
+            <div class="settings-action-group">
+                <div>
+                    <strong>Encrypted backup</strong>
+                    <small>Contains the private NWC credential. EasyCryptoSend cannot recover it.</small>
+                </div>
+                <div class="button-row">
+                    <button id="exportBackupButton" class="secondary-button" type="button">Export</button>
+                    <button id="importBackupButton" class="secondary-button" type="button">Import</button>
+                    <input id="backupFileInput" type="file" accept="application/json,.json" hidden />
+                </div>
+            </div>
             <button id="settingsClearConnectionButton" class="danger-button" type="button">Forget NWC string</button>
             <div id="settingsStatus" class="status-line"></div>
         </section>
@@ -457,6 +468,25 @@
             <button id="deviceUnlockRetryButton" class="primary-button" type="button">Unlock</button>
             <button id="deviceUnlockForgetButton" class="secondary-button full-width-action" type="button">Forget saved connection</button>
             <div id="deviceUnlockStatus" class="status-line"></div>
+        </div>
+    </div>
+
+    <div id="backupPasswordOverlay" class="device-unlock-overlay" hidden role="dialog" aria-modal="true" aria-labelledby="backupPasswordTitle" aria-describedby="backupPasswordText">
+        <div class="device-unlock-sheet backup-password-sheet">
+            <div class="device-unlock-icon">N</div>
+            <h2 id="backupPasswordTitle">Encrypt backup</h2>
+            <p id="backupPasswordText"></p>
+            <label class="field-label" for="backupPasswordInput">Password</label>
+            <input id="backupPasswordInput" class="field" type="password" autocomplete="new-password" />
+            <div id="backupPasswordConfirmWrap">
+                <label class="field-label" for="backupPasswordConfirmInput">Confirm password</label>
+                <input id="backupPasswordConfirmInput" class="field" type="password" autocomplete="new-password" />
+            </div>
+            <div class="button-row">
+                <button id="backupPasswordSubmitButton" class="primary-button" type="button">Continue</button>
+                <button id="backupPasswordCancelButton" class="secondary-button" type="button">Cancel</button>
+            </div>
+            <div id="backupPasswordStatus" class="status-line"></div>
         </div>
     </div>
 </body>

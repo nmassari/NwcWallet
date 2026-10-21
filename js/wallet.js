@@ -1,6 +1,8 @@
 import "../css/ecs.css";
 import { BrowserQRCodeReader } from "@zxing/browser";
 import {
+    buildNwcUri,
+    generateNwcClientIdentity,
     NostrPaymentMessages,
     NwcKit,
     generateInvoiceRequestCode,
@@ -21,8 +23,11 @@ const installPromptSnoozedUntilKey = "nwc_wallet_install_prompt_snoozed_until";
 const deviceUnlockEnabledKey = "nwc_wallet_device_unlock_enabled";
 const deviceUnlockCredentialKey = "nwc_wallet_device_unlock_credential";
 const deviceUnlockPromptedKey = "nwc_wallet_device_unlock_prompted";
+const encryptedBackupFormat = "nwcwallet-encrypted-backup";
+const encryptedBackupVersion = 1;
+const backupKdfIterations = 310000;
 const billingApiBaseUrl = "https://ocb.easycryptosend.it/api/billing";
-const appBuild = "pwa-v11-20260916";
+const appBuild = "pwa-v12-20261022";
 const easyCryptoSendHost = "easycryptosend.it";
 const bitcoinOnchainAsset = {
     asset: "BTC",
@@ -123,6 +128,8 @@ let walletAssetBalances = [];
 let receiveAsset = "LNBTC";
 let payAsset = "LNBTC";
 let activeAssetPickerSide = "send";
+let backupPasswordResolver = null;
+let pendingBackupFile = null;
 
 function $(id) {
     return document.getElementById(id);
@@ -520,6 +527,184 @@ function randomBytes(length = 32) {
     const bytes = new Uint8Array(length);
     crypto.getRandomValues(bytes);
     return bytes;
+}
+
+async function deriveBackupKey(password, salt, usages) {
+    const material = await crypto.subtle.importKey(
+        "raw",
+        new TextEncoder().encode(password),
+        "PBKDF2",
+        false,
+        ["deriveKey"]
+    );
+
+    return crypto.subtle.deriveKey(
+        {
+            name: "PBKDF2",
+            hash: "SHA-256",
+            salt,
+            iterations: backupKdfIterations
+        },
+        material,
+        { name: "AES-GCM", length: 256 },
+        false,
+        usages
+    );
+}
+
+async function encryptConnectionBackup(nwcString, password) {
+    const salt = randomBytes(16);
+    const iv = randomBytes(12);
+    const key = await deriveBackupKey(password, salt, ["encrypt"]);
+    const encrypted = await crypto.subtle.encrypt(
+        { name: "AES-GCM", iv },
+        key,
+        new TextEncoder().encode(nwcString)
+    );
+
+    return {
+        format: encryptedBackupFormat,
+        version: encryptedBackupVersion,
+        createdAt: new Date().toISOString(),
+        kdf: {
+            name: "PBKDF2",
+            hash: "SHA-256",
+            iterations: backupKdfIterations,
+            salt: bytesToBase64Url(salt)
+        },
+        cipher: {
+            name: "AES-GCM",
+            iv: bytesToBase64Url(iv),
+            data: bytesToBase64Url(encrypted)
+        }
+    };
+}
+
+async function decryptConnectionBackup(backup, password) {
+    if (backup?.format !== encryptedBackupFormat || backup?.version !== encryptedBackupVersion) {
+        throw new Error("This is not a supported NwcWallet backup.");
+    }
+
+    if (backup?.kdf?.name !== "PBKDF2" || backup?.kdf?.hash !== "SHA-256" ||
+        backup?.kdf?.iterations !== backupKdfIterations || backup?.cipher?.name !== "AES-GCM") {
+        throw new Error("The backup uses unsupported encryption settings.");
+    }
+
+    const salt = base64UrlToBytes(backup.kdf.salt || "");
+    const iv = base64UrlToBytes(backup.cipher.iv || "");
+    const encrypted = base64UrlToBytes(backup.cipher.data || "");
+    const key = await deriveBackupKey(password, salt, ["decrypt"]);
+
+    try {
+        const decrypted = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, encrypted);
+        const nwcString = new TextDecoder().decode(decrypted);
+        parseNwcUri(nwcString);
+        return nwcString;
+    } catch {
+        throw new Error("Wrong password or damaged backup.");
+    }
+}
+
+function requestBackupPassword(mode) {
+    if (backupPasswordResolver) {
+        return Promise.reject(new Error("A backup prompt is already open."));
+    }
+
+    const isExport = mode === "export";
+    text("backupPasswordTitle", isExport ? "Encrypt backup" : "Unlock backup");
+    text(
+        "backupPasswordText",
+        isExport
+            ? "Choose a password for this backup file. It cannot be recovered if you forget it."
+            : "Enter the password used when this backup was created."
+    );
+    value("backupPasswordInput", "");
+    value("backupPasswordConfirmInput", "");
+    $("backupPasswordConfirmWrap").hidden = !isExport;
+    clearStatus("backupPasswordStatus");
+    $("backupPasswordOverlay").hidden = false;
+
+    setTimeout(() => $("backupPasswordInput")?.focus(), 0);
+
+    return new Promise(resolve => {
+        backupPasswordResolver = { resolve, mode };
+    });
+}
+
+function closeBackupPassword(password = null) {
+    const pending = backupPasswordResolver;
+    backupPasswordResolver = null;
+    $("backupPasswordOverlay").hidden = true;
+    value("backupPasswordInput", "");
+    value("backupPasswordConfirmInput", "");
+    pending?.resolve(password);
+}
+
+function submitBackupPassword() {
+    if (!backupPasswordResolver) return;
+
+    const password = $("backupPasswordInput").value;
+    if (password.length < 10) {
+        status("backupPasswordStatus", "Use at least 10 characters.", "error");
+        return;
+    }
+
+    if (backupPasswordResolver.mode === "export" && password !== $("backupPasswordConfirmInput").value) {
+        status("backupPasswordStatus", "Passwords do not match.", "error");
+        return;
+    }
+
+    closeBackupPassword(password);
+}
+
+async function exportEncryptedBackup() {
+    const nwcString = localStorage.getItem(savedConnectionKey) || "";
+    if (!nwcString) {
+        status("settingsStatus", "Connect a wallet before creating a backup.", "error");
+        return;
+    }
+
+    try {
+        const password = await requestBackupPassword("export");
+        if (!password) return;
+
+        const backup = await encryptConnectionBackup(nwcString, password);
+        const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement("a");
+        anchor.href = url;
+        anchor.download = `nwcwallet-backup-${new Date().toISOString().slice(0, 10)}.json`;
+        anchor.click();
+        setTimeout(() => URL.revokeObjectURL(url), 0);
+        status("settingsStatus", "Encrypted backup created. Keep the file and password separate.", "success");
+    } catch (err) {
+        console.error(err);
+        status("settingsStatus", err?.message || String(err), "error");
+    }
+}
+
+async function importEncryptedBackup(file) {
+    if (!file) return;
+
+    try {
+        const password = await requestBackupPassword("import");
+        if (!password) return;
+
+        const backup = JSON.parse(await file.text());
+        const nwcString = await decryptConnectionBackup(backup, password);
+        value("nwcInput", nwcString);
+        const connected = await connectWithString(nwcString, true);
+        if (!connected) {
+            throw new Error("Backup decrypted, but the wallet connection failed.");
+        }
+        status("settingsStatus", "Encrypted backup restored.", "success");
+    } catch (err) {
+        console.error(err);
+        status("settingsStatus", err?.message || String(err), "error");
+    } finally {
+        $("backupFileInput").value = "";
+        pendingBackupFile = null;
+    }
 }
 
 function isDeviceUnlockAvailable() {
@@ -1250,6 +1435,7 @@ async function requestHostedWallet() {
         button.disabled = true;
         status("nwcStringStatus", "Creating wallet...");
 
+        const identity = generateNwcClientIdentity();
         const createResponse = await fetch(`${billingApiBaseUrl}/orders`, {
             method: "POST",
             headers: {
@@ -1258,7 +1444,8 @@ async function requestHostedWallet() {
             body: JSON.stringify({
                 orderType: "NostrWalletConnect",
                 plan: "wallet",
-                label: "NwcWallet"
+                label: "NwcWallet",
+                clientPubkey: identity.publicKey
             })
         });
 
@@ -1273,11 +1460,18 @@ async function requestHostedWallet() {
 
         const statusResponse = await fetch(`${billingApiBaseUrl}/orders/${orderId}`);
         const result = await readApiResponse(statusResponse);
-        const nwcString = result?.nostrWalletConnect || "";
+        const descriptor = result?.nwcConnection;
 
-        if (!nwcString) {
-            throw new Error("Wallet connection was not returned by the server.");
+        if (!descriptor?.walletPubkey || !descriptor?.relayUrl ||
+            descriptor?.clientPubkey?.toLowerCase() !== identity.publicKey.toLowerCase()) {
+            throw new Error("The server returned an invalid wallet connection descriptor.");
         }
+
+        const nwcString = buildNwcUri({
+            walletPubkey: descriptor.walletPubkey,
+            relayUrl: descriptor.relayUrl,
+            secret: identity.secret
+        });
 
         value("nwcInput", nwcString);
         await connectWithString(nwcString, true);
@@ -1330,6 +1524,8 @@ async function connectWithString(raw, saveConnection) {
         if (saveConnection) {
             await maybeOfferDeviceUnlock();
         }
+
+        return true;
     } catch (err) {
         console.error(err);
         client = null;
@@ -1338,6 +1534,7 @@ async function connectWithString(raw, saveConnection) {
         setConnectedUi(false);
         status("nwcStringStatus", err?.message || String(err), "error");
         setView("nwc-string");
+        return false;
     }
 }
 
@@ -2203,6 +2400,20 @@ function wireEvents() {
     $("reverseSwapAddressQrImage").addEventListener("click", () => copyText($("reverseSwapAddressInput").value.trim(), "swapStatus"));
     $("clearConnectionButton").addEventListener("click", forgetConnection);
     $("settingsClearConnectionButton").addEventListener("click", forgetConnection);
+    $("exportBackupButton").addEventListener("click", exportEncryptedBackup);
+    $("importBackupButton").addEventListener("click", () => $("backupFileInput").click());
+    $("backupFileInput").addEventListener("change", event => {
+        pendingBackupFile = event.target.files?.[0] || null;
+        importEncryptedBackup(pendingBackupFile);
+    });
+    $("backupPasswordSubmitButton").addEventListener("click", submitBackupPassword);
+    $("backupPasswordCancelButton").addEventListener("click", () => closeBackupPassword());
+    $("backupPasswordInput").addEventListener("keydown", event => {
+        if (event.key === "Enter") submitBackupPassword();
+    });
+    $("backupPasswordConfirmInput").addEventListener("keydown", event => {
+        if (event.key === "Enter") submitBackupPassword();
+    });
     $("closeScannerButton").addEventListener("click", closeScanner);
     $("themeToggleButton").addEventListener("click", toggleTheme);
     $("deviceUnlockToggleButton").addEventListener("click", toggleDeviceUnlock);
