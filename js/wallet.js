@@ -21,12 +21,13 @@ const installPromptSnoozedUntilKey = "nwc_wallet_install_prompt_snoozed_until";
 const deviceUnlockEnabledKey = "nwc_wallet_device_unlock_enabled";
 const deviceUnlockCredentialKey = "nwc_wallet_device_unlock_credential";
 const deviceUnlockPromptedKey = "nwc_wallet_device_unlock_prompted";
+const deviceUnlockRepairKey = "nwc_wallet_device_unlock_repair_v1";
 const encryptedBackupFormat = "nwcwallet-encrypted-backup";
 const encryptedBackupVersion = 1;
 const backupKdfIterations = 310000;
 const billingApiBaseUrl = "https://ocb.easycryptosend.it/api/billing";
 const providerInfoUrl = "https://nwc.easycryptosend.it/api/nwc/provider-info";
-const appBuild = "pwa-v15-20261027";
+const appBuild = "pwa-v16-20261027";
 const easyCryptoSendHost = "easycryptosend.it";
 const bitcoinOnchainAsset = {
     asset: "BTC",
@@ -685,6 +686,17 @@ function isDeviceUnlockAvailable() {
 
 function isDeviceUnlockEnabled() {
     return localStorage.getItem(deviceUnlockEnabledKey) === "1" && !!localStorage.getItem(deviceUnlockCredentialKey);
+}
+
+function repairDeviceUnlockPromptState() {
+    const wasPrompted = localStorage.getItem(deviceUnlockPromptedKey) === "1";
+    const hasCredential = !!localStorage.getItem(deviceUnlockCredentialKey);
+    const alreadyRepaired = localStorage.getItem(deviceUnlockRepairKey) === "1";
+
+    if (wasPrompted && !hasCredential && !alreadyRepaired) {
+        localStorage.removeItem(deviceUnlockPromptedKey);
+        localStorage.setItem(deviceUnlockRepairKey, "1");
+    }
 }
 
 function getDeviceUnlockErrorMessage(err) {
@@ -2523,6 +2535,8 @@ function clearSavedConnectionData() {
     localStorage.removeItem(deviceUnlockEnabledKey);
     localStorage.removeItem(deviceUnlockCredentialKey);
     localStorage.removeItem(`${deviceUnlockCredentialKey}_user`);
+    localStorage.removeItem(deviceUnlockPromptedKey);
+    localStorage.removeItem(deviceUnlockRepairKey);
     updateDeviceUnlockUi();
     hideDeviceUnlockOverlay();
 }
@@ -2689,6 +2703,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     renderScheduler();
     setDefaultSchedulerDates();
     setSchedulerAsset("LNBTC");
+    repairDeviceUnlockPromptState();
     const savedConnection = restoreSavedConnection();
     updateDeviceUnlockUi();
     clearWalletInfo();
