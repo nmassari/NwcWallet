@@ -27,7 +27,8 @@ const encryptedBackupFormat = "nwcwallet-encrypted-backup";
 const encryptedBackupVersion = 1;
 const backupKdfIterations = 310000;
 const billingApiBaseUrl = "https://ocb.easycryptosend.it/api/billing";
-const appBuild = "pwa-v12-20261022";
+const providerInfoUrl = "https://nwc.easycryptosend.it/api/nwc/provider-info";
+const appBuild = "pwa-v13-20261027";
 const easyCryptoSendHost = "easycryptosend.it";
 const bitcoinOnchainAsset = {
     asset: "BTC",
@@ -222,6 +223,52 @@ async function readApiResponse(response) {
     }
 
     return getResponseData(payload);
+}
+
+function isNostrPubkey(value) {
+    return typeof value === "string" && /^[0-9a-f]{64}$/i.test(value);
+}
+
+function isEasyCryptoSendConnection(parsedConnection) {
+    try {
+        return new URL(parsedConnection?.relayUrl || "").hostname.toLowerCase() === "relay.easycryptosend.it";
+    } catch {
+        return false;
+    }
+}
+
+async function getProviderRotation(parsedConnection) {
+    if (!isEasyCryptoSendConnection(parsedConnection) || !isNostrPubkey(parsedConnection?.walletPubkey)) {
+        return null;
+    }
+
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 5000);
+
+    try {
+        const response = await fetch(providerInfoUrl, {
+            method: "GET",
+            cache: "no-store",
+            signal: controller.signal
+        });
+        const provider = await readApiResponse(response);
+        const currentPubkey = String(provider?.walletServicePubkey || "").toLowerCase();
+        const savedPubkey = parsedConnection.walletPubkey.toLowerCase();
+        const retiredPubkeys = Array.isArray(provider?.retiredWalletServicePubkeys)
+            ? provider.retiredWalletServicePubkeys.map(value => String(value).toLowerCase())
+            : [];
+
+        if (!isNostrPubkey(currentPubkey) || currentPubkey === savedPubkey || !retiredPubkeys.includes(savedPubkey)) {
+            return null;
+        }
+
+        return {currentPubkey, savedPubkey};
+    } catch (err) {
+        console.warn("Could not verify NWC provider key rotation.", err);
+        return null;
+    } finally {
+        window.clearTimeout(timeout);
+    }
 }
 
 function shorten(input, start = 10, end = 8) {
@@ -1486,7 +1533,36 @@ async function requestHostedWallet() {
 async function connectWithString(raw, saveConnection) {
     try {
         status("nwcStringStatus", "Connecting...");
-        connection = parseNwcUri(raw);
+        const parsedConnection = parseNwcUri(raw);
+        const rotation = await getProviderRotation(parsedConnection);
+
+        if (rotation) {
+            clearWalletInfo();
+            setConnectedUi(false);
+            status("nwcStringStatus", "This EasyCryptoSend connection was retired after a provider security-key rotation.", "error");
+
+            const replaceConnection = window.confirm(
+                "EasyCryptoSend rotated its NWC provider security key. This saved connection is officially retired. Forget it and generate a new wallet connection now?"
+            );
+
+            if (replaceConnection) {
+                clearSavedConnectionData();
+                value("nwcInput", "");
+                if (client) {
+                    try { await client.disconnect(); } catch {}
+                }
+                stopAppMessages();
+                client = null;
+                connection = null;
+                await requestHostedWallet();
+            } else {
+                setView("nwc-string");
+            }
+
+            return false;
+        }
+
+        connection = parsedConnection;
 
         if (client) {
             try { await client.disconnect(); } catch {}
@@ -2290,19 +2366,23 @@ function restoreSavedConnection() {
     return saved;
 }
 
+function clearSavedConnectionData() {
+    localStorage.removeItem(savedConnectionKey);
+    localStorage.removeItem(deviceUnlockEnabledKey);
+    localStorage.removeItem(deviceUnlockCredentialKey);
+    localStorage.removeItem(`${deviceUnlockCredentialKey}_user`);
+    updateDeviceUnlockUi();
+    hideDeviceUnlockOverlay();
+}
+
 function forgetConnection() {
     const confirmed = window.confirm("Forget the saved wallet connection and disconnect this wallet?");
     if (!confirmed) {
         return;
     }
 
-    localStorage.removeItem(savedConnectionKey);
-    localStorage.removeItem(deviceUnlockEnabledKey);
-    localStorage.removeItem(deviceUnlockCredentialKey);
-    localStorage.removeItem(`${deviceUnlockCredentialKey}_user`);
+    clearSavedConnectionData();
     value("nwcInput", "");
-    updateDeviceUnlockUi();
-    hideDeviceUnlockOverlay();
     disconnectWallet();
     status("settingsStatus", "Connection forgotten.", "success");
     setView("nwc-string");

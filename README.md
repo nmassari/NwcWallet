@@ -7,6 +7,7 @@ NwcWallet is the EasyCryptoSend browser wallet for Nostr Wallet Connect (NWC). I
 - NWC connection management with QR scanning support.
 - Client-side NWC identity generation: hosted-wallet provisioning sends only the public key to EasyCryptoSend.
 - Password-encrypted local export/import of the NWC connection credential.
+- Provider-key rotation recovery that is offered only for EasyCryptoSend keys explicitly marked as retired by NwcProvider.
 - Lightning BTC balance, invoice creation, and invoice payment.
 - LNUSDT balance tab backed by Taproot Asset NWC methods.
 - LNUSDT invoice creation and payment through `make_taproot_asset_invoice` and `pay_taproot_asset_invoice`.
