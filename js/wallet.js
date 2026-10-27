@@ -21,13 +21,13 @@ const installPromptSnoozedUntilKey = "nwc_wallet_install_prompt_snoozed_until";
 const deviceUnlockEnabledKey = "nwc_wallet_device_unlock_enabled";
 const deviceUnlockCredentialKey = "nwc_wallet_device_unlock_credential";
 const deviceUnlockPromptedKey = "nwc_wallet_device_unlock_prompted";
-const deviceUnlockRepairKey = "nwc_wallet_device_unlock_repair_v1";
+const deviceUnlockRepairKey = "nwc_wallet_device_unlock_repair_v2";
 const encryptedBackupFormat = "nwcwallet-encrypted-backup";
 const encryptedBackupVersion = 1;
 const backupKdfIterations = 310000;
 const billingApiBaseUrl = "https://ocb.easycryptosend.it/api/billing";
 const providerInfoUrl = "https://nwc.easycryptosend.it/api/nwc/provider-info";
-const appBuild = "pwa-v16-20261027";
+const appBuild = "pwa-v17-20261027";
 const easyCryptoSendHost = "easycryptosend.it";
 const bitcoinOnchainAsset = {
     asset: "BTC",
@@ -134,6 +134,7 @@ let swapHistory = [];
 let contacts = [];
 let subscriptions = [];
 let deviceUnlockRequestInFlight = false;
+let deviceUnlockOverlayMode = "unlock";
 let swapSendAssetKey = "btc_onchain";
 let swapReceiveAssetKey = "btc_lightning";
 let activeBalanceAsset = "LNBTC";
@@ -875,20 +876,33 @@ async function maybeOfferDeviceUnlock() {
         return;
     }
 
-    const accepted = window.confirm(`Enable secure unlock for NwcWallet with ${getDeviceUnlockLabel()}?`);
     localStorage.setItem(deviceUnlockPromptedKey, "1");
-
-    if (accepted) {
-        await enableDeviceUnlock("settingsStatus");
-    }
+    showDeviceUnlockSetupOverlay();
 }
 
 function showDeviceUnlockOverlay(message = "") {
     const overlay = $("deviceUnlockOverlay");
     if (!overlay) return;
 
+    deviceUnlockOverlayMode = "unlock";
+    text("deviceUnlockTitle", "Unlock NwcWallet");
     text("deviceUnlockText", `Use ${getDeviceUnlockLabel()} to open the wallet.`);
+    text("deviceUnlockRetryButton", "Unlock");
+    text("deviceUnlockForgetButton", "Forget saved connection");
     status("deviceUnlockStatus", message, message ? "error" : "info");
+    overlay.hidden = false;
+}
+
+function showDeviceUnlockSetupOverlay() {
+    const overlay = $("deviceUnlockOverlay");
+    if (!overlay) return;
+
+    deviceUnlockOverlayMode = "setup";
+    text("deviceUnlockTitle", "Protect NwcWallet");
+    text("deviceUnlockText", `Enable ${getDeviceUnlockLabel()} whenever you open this saved wallet.`);
+    text("deviceUnlockRetryButton", "Enable secure unlock");
+    text("deviceUnlockForgetButton", "Not now");
+    clearStatus("deviceUnlockStatus");
     overlay.hidden = false;
 }
 
@@ -2669,13 +2683,24 @@ function wireEvents() {
     $("themeToggleButton").addEventListener("click", toggleTheme);
     $("deviceUnlockToggleButton").addEventListener("click", toggleDeviceUnlock);
     $("deviceUnlockRetryButton").addEventListener("click", async () => {
+        if (deviceUnlockOverlayMode === "setup") {
+            const enabled = await enableDeviceUnlock("deviceUnlockStatus");
+            if (enabled) hideDeviceUnlockOverlay();
+            return;
+        }
         const savedConnection = restoreSavedConnection();
         const unlocked = await unlockSavedConnectionBeforeConnect();
         if (unlocked && savedConnection) {
             await connectWithString(savedConnection, false);
         }
     });
-    $("deviceUnlockForgetButton").addEventListener("click", forgetConnection);
+    $("deviceUnlockForgetButton").addEventListener("click", () => {
+        if (deviceUnlockOverlayMode === "setup") {
+            hideDeviceUnlockOverlay();
+            return;
+        }
+        forgetConnection();
+    });
     $("installAppButton").addEventListener("click", installPwa);
     $("dismissInstallButton").addEventListener("click", dismissInstallPrompt);
 }

@@ -1,4 +1,4 @@
-const CACHE_NAME = "nwc-wallet-v13";
+const CACHE_NAME = "nwc-wallet-v14";
 const PRECACHE_URLS = [
   "/",
   "/index.html",
