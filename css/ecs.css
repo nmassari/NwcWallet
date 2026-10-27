@@ -730,6 +730,46 @@ button:disabled {
     margin-top: 4px;
 }
 
+.subscription-offer-card {
+    margin-top: 16px;
+}
+
+.subscription-offer-card .compact-textarea {
+    min-height: 72px;
+    margin-top: 6px;
+}
+
+.verified-offer {
+    display: grid;
+    gap: 6px;
+    margin-top: 8px;
+    padding: 14px;
+    border: 1px solid var(--success-border);
+    border-radius: 16px;
+    background: var(--success-bg);
+}
+
+.verified-offer[hidden] {
+    display: none;
+}
+
+.verified-offer-badge {
+    width: max-content;
+    padding: 5px 9px;
+    border-radius: 999px;
+    color: var(--success-text);
+    background: rgba(22, 163, 74, .12);
+    font-size: 11px;
+    font-weight: 850;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+}
+
+.verified-offer small {
+    color: var(--muted);
+    line-height: 1.45;
+}
+
 .textarea {
     min-height: 132px;
     resize: vertical;

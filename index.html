@@ -306,19 +306,51 @@
 
             <div class="early-access-card compact-info">
                 <div>
-                    <strong>Pull invoice subscriptions</strong>
+                    <strong>Recurring payment authorization</strong>
                     <p>
-                        This wallet requests each recurring invoice with a one-time code. A payment is prepared only when the merchant response matches that request.
+                        Create a separate NWC credential restricted to one merchant, asset, spending limit and expiry. The scheduler never receives your main wallet connection.
                     </p>
                 </div>
             </div>
 
             <div class="info-list">
                 <div class="info-row">
-                    <span>Customer pubkey</span>
+                    <span>Wallet pubkey</span>
                     <strong id="schedulerCustomerPubkey">-</strong>
                 </div>
+                <div class="info-row">
+                    <span>Scheduler</span>
+                    <strong id="schedulerAuthorizationMode">Not available</strong>
+                </div>
             </div>
+
+            <div class="setup-card subscription-offer-card">
+                <strong>Merchant subscription offer</strong>
+                <span>Scan a signed Nostr offer to verify the merchant and fill the terms automatically.</span>
+                <textarea id="schedulerOfferReferenceInput" class="field textarea compact-textarea" spellcheck="false" placeholder="nostr:naddr1..."></textarea>
+                <div class="button-row">
+                    <button class="primary-button" type="button" data-scan-target="schedulerOfferReferenceInput" data-scan-status="schedulerStatus">Scan offer QR</button>
+                    <button id="loadSubscriptionOfferButton" class="secondary-button" type="button">Paste and load offer</button>
+                </div>
+                <div id="verifiedSubscriptionOffer" class="verified-offer" hidden>
+                    <span class="verified-offer-badge">Signature verified</span>
+                    <strong id="verifiedOfferTitle">-</strong>
+                    <small id="verifiedOfferDetails">-</small>
+                </div>
+            </div>
+
+            <label class="field-label">Payment asset</label>
+            <div class="balance-tabs receive-pay-tabs" role="tablist" aria-label="Subscription payment asset">
+                <button class="balance-tab active" type="button" data-scheduler-asset="LNBTC" role="tab" aria-selected="true">LNBTC</button>
+                <button class="balance-tab" type="button" data-scheduler-asset="LNUSDT" role="tab" aria-selected="false">LNUSDT</button>
+            </div>
+
+            <label class="field-label" for="schedulerBillingModelInput">Billing model</label>
+            <select id="schedulerBillingModelInput" class="field">
+                <option value="recurring_fixed">Recurring fixed amount</option>
+                <option value="fixed_installments">Fixed installment plan</option>
+                <option value="recurring_variable">Recurring variable amount</option>
+            </select>
 
             <label class="field-label" for="schedulerMerchantNameInput">Merchant name</label>
             <input id="schedulerMerchantNameInput" class="field" type="text" placeholder="Merchant or service" />
@@ -331,7 +363,7 @@
 
             <div class="scheduler-two-col">
                 <div>
-                    <label class="field-label" for="schedulerAmountInput">Amount sats</label>
+                    <label id="schedulerAmountLabel" class="field-label" for="schedulerAmountInput">Amount sats</label>
                     <input id="schedulerAmountInput" class="field" type="number" min="1" value="1000" />
                 </div>
                 <div>
@@ -341,31 +373,53 @@
                         <option value="weekly">Weekly</option>
                         <option value="daily">Daily</option>
                         <option value="yearly">Yearly</option>
-                        <option value="custom">Custom</option>
                     </select>
+                </div>
+            </div>
+
+            <div id="schedulerInstallmentFields" class="scheduler-two-col" hidden>
+                <div>
+                    <label class="field-label" for="schedulerTotalAmountInput">Total amount</label>
+                    <input id="schedulerTotalAmountInput" class="field" type="number" min="1" value="12000" />
+                </div>
+                <div>
+                    <label class="field-label" for="schedulerInstallmentCountInput">Number of installments</label>
+                    <input id="schedulerInstallmentCountInput" class="field" type="number" min="1" max="10000" step="1" value="12" />
                 </div>
             </div>
 
             <div class="scheduler-two-col">
                 <div>
-                    <label class="field-label" for="schedulerNextDueInput">Next due date</label>
-                    <input id="schedulerNextDueInput" class="field" type="date" />
+                    <label class="field-label" for="schedulerMaxSingleInput">Maximum per payment</label>
+                    <input id="schedulerMaxSingleInput" class="field" type="number" min="1" value="1000" />
                 </div>
                 <div>
-                    <label class="field-label" for="schedulerBillingPeriodInput">Billing period</label>
-                    <input id="schedulerBillingPeriodInput" class="field" type="text" placeholder="2026-07" />
+                    <label class="field-label" for="schedulerMaxPeriodInput">Maximum per period</label>
+                    <input id="schedulerMaxPeriodInput" class="field" type="number" min="1" value="1000" />
                 </div>
             </div>
 
-            <button id="generateBillingPeriodButton" class="secondary-button full-width-action" type="button">Generate billing period</button>
+            <div class="scheduler-two-col">
+                <div>
+                    <label class="field-label" for="schedulerNextDueInput">First payment</label>
+                    <input id="schedulerNextDueInput" class="field" type="date" />
+                </div>
+                <div>
+                    <label class="field-label" for="schedulerExpiresInput">Authorization expires</label>
+                    <input id="schedulerExpiresInput" class="field" type="date" />
+                </div>
+            </div>
 
             <label class="field-label" for="schedulerDescriptionInput">Description</label>
             <input id="schedulerDescriptionInput" class="field" type="text" value="Recurring payment" />
 
             <div class="button-row">
-                <button id="saveSchedulerButton" class="secondary-button" type="button">Save</button>
-                <button id="requestSubscriptionInvoiceButton" class="primary-button" type="button">Request invoice</button>
+                <button id="createSubscriptionAuthorizationButton" class="primary-button" type="button">Authorize subscription</button>
             </div>
+
+            <button id="revokeSubscriptionAuthorizationButton" class="danger-button full-width-action" type="button" hidden>
+                Revoke selected authorization
+            </button>
 
             <div id="schedulerStatus" class="status-line"></div>
 

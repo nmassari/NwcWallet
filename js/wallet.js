@@ -3,11 +3,10 @@ import { BrowserQRCodeReader } from "@zxing/browser";
 import {
     buildNwcUri,
     generateNwcClientIdentity,
+    loadSubscriptionOffer,
     NostrPaymentMessages,
     NwcKit,
-    generateInvoiceRequestCode,
-    parseNwcUri,
-    validateSubscriptionInvoiceResponse
+    parseNwcUri
 } from "nwckit";
 import { InvoiceQr } from "./invoice-qr.js";
 
@@ -17,7 +16,6 @@ const themeKey = "nwc_wallet_theme";
 const swapHistoryKey = "nwc_wallet_swap_history";
 const contactsKey = "nwc_wallet_contacts";
 const subscriptionsKey = "nwc_wallet_subscriptions";
-const pendingInvoiceRequestsKey = "nwc_wallet_pending_invoice_requests";
 const installPromptDismissedKey = "nwc_wallet_install_prompt_dismissed";
 const installPromptSnoozedUntilKey = "nwc_wallet_install_prompt_snoozed_until";
 const deviceUnlockEnabledKey = "nwc_wallet_device_unlock_enabled";
@@ -28,7 +26,7 @@ const encryptedBackupVersion = 1;
 const backupKdfIterations = 310000;
 const billingApiBaseUrl = "https://ocb.easycryptosend.it/api/billing";
 const providerInfoUrl = "https://nwc.easycryptosend.it/api/nwc/provider-info";
-const appBuild = "pwa-v13-20261027";
+const appBuild = "pwa-v15-20261027";
 const easyCryptoSendHost = "easycryptosend.it";
 const bitcoinOnchainAsset = {
     asset: "BTC",
@@ -108,8 +106,22 @@ const swapAssetChoices = {
 let client = null;
 let appMessages = null;
 let connection = null;
+let walletCapabilities = null;
+let walletInfo = null;
 let lastCreatedInvoice = "";
 let lastSwapDepositAddress = "";
+let pendingSwapAttempt = null;
+
+function withSwapRequestId(request) {
+    const fingerprint = JSON.stringify(request);
+    if (!pendingSwapAttempt || pendingSwapAttempt.fingerprint !== fingerprint) {
+        pendingSwapAttempt = {
+            fingerprint,
+            requestId: crypto.randomUUID().replaceAll("-", "")
+        };
+    }
+    return { ...request, requestId: pendingSwapAttempt.requestId };
+}
 let currentView = "home";
 let qrReader = null;
 let scannerControls = null;
@@ -120,7 +132,6 @@ let deferredInstallPrompt = null;
 let swapHistory = [];
 let contacts = [];
 let subscriptions = [];
-let pendingInvoiceRequests = [];
 let deviceUnlockRequestInFlight = false;
 let swapSendAssetKey = "btc_onchain";
 let swapReceiveAssetKey = "btc_lightning";
@@ -128,6 +139,8 @@ let activeBalanceAsset = "LNBTC";
 let walletAssetBalances = [];
 let receiveAsset = "LNBTC";
 let payAsset = "LNBTC";
+let schedulerAsset = "LNBTC";
+let selectedSubscriptionId = null;
 let activeAssetPickerSide = "send";
 let backupPasswordResolver = null;
 let pendingBackupFile = null;
@@ -286,6 +299,12 @@ function formatSats(amount) {
     return `${Number.isFinite(value) ? value.toLocaleString("en-US") : "0"} sats`;
 }
 
+function amountToApi(amount) {
+    return schedulerAsset === "LNBTC"
+        ? String(Math.round(Number(amount)))
+        : String(Number(amount));
+}
+
 function formatTime(unixSeconds) {
     if (!unixSeconds) return "-";
     return new Date(unixSeconds * 1000).toLocaleString([], {
@@ -305,64 +324,6 @@ function toIsoDate(date) {
     const month = String(date.getMonth() + 1).padStart(2, "0");
     const day = String(date.getDate()).padStart(2, "0");
     return `${year}-${month}-${day}`;
-}
-
-function parseIsoDate(value) {
-    if (!value) return null;
-    const [year, month, day] = value.split("-").map(Number);
-    if (!year || !month || !day) return null;
-    return new Date(year, month - 1, day);
-}
-
-function getIsoWeek(date) {
-    const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
-    const day = d.getUTCDay() || 7;
-    d.setUTCDate(d.getUTCDate() + 4 - day);
-    const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-    const week = Math.ceil((((d.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
-    return {
-        year: d.getUTCFullYear(),
-        week
-    };
-}
-
-function generateBillingPeriod(interval, dueDateValue) {
-    const dueDate = parseIsoDate(dueDateValue) || new Date();
-    const year = dueDate.getFullYear();
-    const month = String(dueDate.getMonth() + 1).padStart(2, "0");
-    const day = String(dueDate.getDate()).padStart(2, "0");
-
-    if (interval === "daily") {
-        return `${year}-${month}-${day}`;
-    }
-
-    if (interval === "weekly") {
-        const { year: weekYear, week } = getIsoWeek(dueDate);
-        return `${weekYear}-W${String(week).padStart(2, "0")}`;
-    }
-
-    if (interval === "yearly") {
-        return String(year);
-    }
-
-    return `${year}-${month}`;
-}
-
-function nextDueDate(interval, dueDateValue) {
-    const dueDate = parseIsoDate(dueDateValue) || new Date();
-    const next = new Date(dueDate);
-
-    if (interval === "daily") {
-        next.setDate(next.getDate() + 1);
-    } else if (interval === "weekly") {
-        next.setDate(next.getDate() + 7);
-    } else if (interval === "yearly") {
-        next.setFullYear(next.getFullYear() + 1);
-    } else {
-        next.setMonth(next.getMonth() + 1);
-    }
-
-    return toIsoDate(next);
 }
 
 function createHistoryItem({ title, meta, amount, amountType, statusText }) {
@@ -433,7 +394,6 @@ function saveSwapHistory() {
 function loadSchedulerState() {
     contacts = readJsonArray(contactsKey);
     subscriptions = readJsonArray(subscriptionsKey);
-    pendingInvoiceRequests = readJsonArray(pendingInvoiceRequestsKey);
 }
 
 function readJsonArray(key) {
@@ -451,10 +411,6 @@ function saveContacts() {
 
 function saveSubscriptions() {
     localStorage.setItem(subscriptionsKey, JSON.stringify(subscriptions.slice(0, 100)));
-}
-
-function savePendingInvoiceRequests() {
-    localStorage.setItem(pendingInvoiceRequestsKey, JSON.stringify(pendingInvoiceRequests.slice(0, 100)));
 }
 
 function upsertContact(contact) {
@@ -484,37 +440,6 @@ function upsertSubscription(subscription) {
 
     saveSubscriptions();
     renderScheduler();
-}
-
-function addPendingInvoiceRequest(request) {
-    pendingInvoiceRequests = [
-        request,
-        ...pendingInvoiceRequests.filter(item =>
-            item.subscriptionId !== request.subscriptionId ||
-            item.billingPeriod !== request.billingPeriod ||
-            item.requestCode !== request.requestCode
-        )
-    ].slice(0, 100);
-
-    savePendingInvoiceRequests();
-}
-
-function consumePendingInvoiceRequest(request) {
-    pendingInvoiceRequests = pendingInvoiceRequests.map(item => {
-        if (item.subscriptionId === request.subscriptionId &&
-            item.billingPeriod === request.billingPeriod &&
-            item.requestCode === request.requestCode) {
-            return {
-                ...item,
-                consumed: true,
-                consumedAt: Date.now()
-            };
-        }
-
-        return item;
-    });
-
-    savePendingInvoiceRequests();
 }
 
 function addSwapHistory(entry) {
@@ -1105,6 +1030,26 @@ function setConnectedUi(isConnected) {
     updateSwapAccessGate();
 }
 
+function setConnectionHealth(state, detail) {
+    if (state === "connected") {
+        text("walletConnectionState", "Connected");
+        text("settingsConnectionState", "On");
+        return;
+    }
+    if (state === "connecting") {
+        text("walletConnectionState", "Connecting...");
+        text("settingsConnectionState", "Connecting");
+        return;
+    }
+    if (state === "degraded") {
+        text("walletConnectionState", "Connection degraded");
+        text("settingsConnectionState", detail ? `Degraded: ${detail}` : "Degraded");
+        return;
+    }
+    text("walletConnectionState", "Not connected");
+    text("settingsConnectionState", "Off");
+}
+
 function clearWalletInfo() {
     text("walletBalance", "-");
     text("walletAlias", "");
@@ -1114,9 +1059,43 @@ function clearWalletInfo() {
     text("walletPubkey", "-");
     text("settingsRelay", "-");
     text("settingsWalletPubkey", "-");
+    walletCapabilities = null;
+    walletInfo = null;
+    updateSchedulerAuthorizationUi();
     setEmptyList("transactionList", "Connect a wallet to see Lightning activity.");
     renderSwapHistory();
     renderScheduler();
+}
+
+function updateSchedulerAuthorizationUi() {
+    const isDedicated = walletCapabilities?.canPaySubscriptionInvoice === true;
+    const canCreate = walletCapabilities?.canCreateSubscriptionAuthorization === true;
+    const canRevokeParent = walletCapabilities?.canRevokeSubscriptionAuthorization === true;
+    const schedulerPubkey = walletInfo?.subscription_scheduler_pubkey;
+    const selected = subscriptions.find(item => item.subscriptionId === selectedSubscriptionId);
+    text(
+        "schedulerAuthorizationMode",
+        !client
+            ? "Not connected"
+            : isDedicated
+                ? "Dedicated recurring NWC"
+                : canCreate && schedulerPubkey
+                    ? "Ready"
+                    : "Provider update required"
+    );
+
+    const createButton = $("createSubscriptionAuthorizationButton");
+    if (createButton) {
+        createButton.disabled = !client || isDedicated || !canCreate || !schedulerPubkey || schedulerAsset !== "LNBTC";
+    }
+
+    const revokeButton = $("revokeSubscriptionAuthorizationButton");
+    if (revokeButton) {
+        const canRevokeSelected = Boolean(selected && selected.status !== "revoked" && canRevokeParent);
+        const canRevokeDedicated = isDedicated && walletCapabilities?.canRevokeSubscription === true;
+        revokeButton.hidden = !canRevokeSelected && !canRevokeDedicated;
+        revokeButton.disabled = !canRevokeSelected && !canRevokeDedicated;
+    }
 }
 
 function startAppMessages() {
@@ -1132,7 +1111,6 @@ function startAppMessages() {
         timeoutMs: 15000
     });
 
-    appMessages.onMessage(handleSchedulerMessage);
     appMessages.onError(error => {
         console.warn("Scheduler message error:", error);
         if (currentView === "scheduler") {
@@ -1152,51 +1130,6 @@ function stopAppMessages() {
 
     appMessages = null;
     text("schedulerCustomerPubkey", "-");
-}
-
-async function handleSchedulerMessage(message) {
-    if (message.type !== "subscription.invoice_response") {
-        return;
-    }
-
-    const response = message.payload || {};
-    const pending = pendingInvoiceRequests.find(item =>
-        item.subscriptionId === response.subscriptionId &&
-        item.billingPeriod === response.billingPeriod &&
-        item.requestCode === response.requestCode &&
-        !item.consumed
-    );
-
-    if (!pending) {
-        status("schedulerStatus", "Invoice response ignored: no matching request.", "error");
-        return;
-    }
-
-    const validation = validateSubscriptionInvoiceResponse({
-        response,
-        pendingRequest: pending
-    });
-
-    if (!validation.ok) {
-        status("schedulerStatus", validation.errors.join(" "), "error");
-        return;
-    }
-
-    consumePendingInvoiceRequest(pending);
-    const subscription = subscriptions.find(item => item.subscriptionId === response.subscriptionId);
-    if (subscription) {
-        upsertSubscription({
-            ...subscription,
-            lastInvoice: response.invoice,
-            lastInvoiceAt: Date.now(),
-            status: "invoice_ready"
-        });
-    }
-
-    value("payInvoiceInput", response.invoice);
-    updatePayInvoicePreview(response.invoice);
-    status("schedulerStatus", "Invoice response validated. Review it in Pay.", "success");
-    setView("pay");
 }
 
 async function refreshBalance() {
@@ -1377,10 +1310,21 @@ function renderSubscriptionList() {
 
     subscriptions.forEach(subscription => {
         const merchant = contacts.find(item => item.pubkey === subscription.merchantPubkey);
+        const billingModel = subscription.billingModel || "recurring_fixed";
+        const modelLabel = billingModel === "fixed_installments"
+            ? `${subscription.installmentCount || "?"} installments`
+            : billingModel === "recurring_variable"
+                ? "variable"
+                : "fixed";
+        const totalLabel = billingModel === "fixed_installments" && subscription.totalAmount
+            ? ` · total ${subscription.totalAmount} ${subscription.asset === "LNUSDT" ? "USDT" : "sat"}`
+            : "";
         const item = createHistoryItem({
             title: merchant?.displayName || subscription.description || "Subscription",
-            meta: `${subscription.billingPeriod || "-"} - ${shorten(subscription.subscriptionId, 8, 8)}`,
-            amount: formatSats(subscription.amountSats),
+            meta: `${modelLabel} · ${subscription.interval || "-"}${totalLabel} · ${shorten(subscription.subscriptionId, 8, 8)}`,
+            amount: subscription.asset === "LNUSDT"
+                ? `${Number(subscription.amount || 0).toLocaleString("en-US")} USDT`
+                : formatSats(subscription.amount),
             amountType: "outgoing",
             statusText: subscription.status || "active"
         });
@@ -1397,12 +1341,21 @@ function selectSubscription(subscriptionId) {
     value("schedulerMerchantPubkeyInput", subscription.merchantPubkey || "");
     value("schedulerMerchantNameInput", getContactName(subscription.merchantPubkey));
     value("schedulerSubscriptionIdInput", subscription.subscriptionId || "");
-    value("schedulerAmountInput", subscription.amountSats || "");
+    selectedSubscriptionId = subscriptionId;
+    value("schedulerBillingModelInput", subscription.billingModel || "recurring_fixed");
+    updateSchedulerBillingModelUi();
+    setSchedulerAsset(subscription.asset || "LNBTC");
+    value("schedulerAmountInput", subscription.amount || "");
+    value("schedulerMaxSingleInput", subscription.maxSinglePayment || subscription.amount || "");
+    value("schedulerMaxPeriodInput", subscription.maxPeriodSpend || subscription.amount || "");
+    value("schedulerTotalAmountInput", subscription.totalAmount || "");
+    value("schedulerInstallmentCountInput", subscription.installmentCount || "");
     value("schedulerIntervalInput", subscription.interval || "monthly");
     value("schedulerNextDueInput", subscription.nextDueDate || todayIsoDate());
-    value("schedulerBillingPeriodInput", subscription.billingPeriod || "");
+    value("schedulerExpiresInput", subscription.expiresDate || "");
     value("schedulerDescriptionInput", subscription.description || "");
-    status("schedulerStatus", "Subscription loaded.", "success");
+    updateSchedulerAuthorizationUi();
+    status("schedulerStatus", "Authorization selected.", "success");
 }
 
 function getContactName(pubkey) {
@@ -1413,23 +1366,68 @@ function getCustomerPubkey() {
     return appMessages?.pubkey || "";
 }
 
-function syncBillingPeriod(force = false) {
-    const interval = $("schedulerIntervalInput")?.value || "monthly";
-    if (interval === "custom" && !force) return;
-
-    const dueDate = $("schedulerNextDueInput")?.value || todayIsoDate();
-    const current = $("schedulerBillingPeriodInput")?.value.trim();
-
-    if (force || !current || interval !== "custom") {
-        value("schedulerBillingPeriodInput", generateBillingPeriod(interval, dueDate));
-    }
-}
-
 function setDefaultSchedulerDates() {
     if (!$("schedulerNextDueInput")?.value) {
         value("schedulerNextDueInput", todayIsoDate());
     }
-    syncBillingPeriod(false);
+    if (!$("schedulerExpiresInput")?.value) {
+        const expiry = new Date();
+        expiry.setFullYear(expiry.getFullYear() + 1);
+        value("schedulerExpiresInput", toIsoDate(expiry));
+    }
+}
+
+async function loadScannedSubscriptionOffer(referenceValue) {
+    const reference = (referenceValue || $("schedulerOfferReferenceInput").value).trim();
+    if (!reference) {
+        status("schedulerStatus", "Scan or paste a subscription offer first.", "error");
+        return;
+    }
+
+    try {
+        status("schedulerStatus", "Loading and verifying the signed Nostr offer…", "info");
+        const fallbackRelays = connection?.relayUrl ? [connection.relayUrl] : [];
+        const verified = await loadSubscriptionOffer(reference, fallbackRelays);
+        const offer = verified.offer;
+        if (offer.validUntil && new Date(offer.validUntil).getTime() <= Date.now()) {
+            throw new Error("This merchant subscription offer has expired.");
+        }
+
+        value("schedulerOfferReferenceInput", reference);
+        $("schedulerOfferReferenceInput").dataset.offerId = offer.offerId;
+        value("schedulerMerchantNameInput", offer.merchantName);
+        value("schedulerMerchantPubkeyInput", verified.merchantPubkey);
+        value(
+            "schedulerSubscriptionIdInput",
+            `${offer.offerId.slice(0, 80)}.${crypto.randomUUID()}`
+        );
+        value("schedulerBillingModelInput", offer.billingModel || "recurring_fixed");
+        updateSchedulerBillingModelUi();
+        setSchedulerAsset(offer.asset);
+        value("schedulerAmountInput", offer.amount);
+        value("schedulerMaxSingleInput", offer.suggestedMaxSinglePayment ?? offer.amount);
+        value("schedulerMaxPeriodInput", offer.suggestedMaxPeriodSpend ?? offer.amount);
+        value("schedulerIntervalInput", offer.interval);
+        if (offer.totalAmount !== undefined) value("schedulerTotalAmountInput", offer.totalAmount);
+        if (offer.installmentCount !== undefined) value("schedulerInstallmentCountInput", offer.installmentCount);
+        if (offer.firstDueAt) value("schedulerNextDueInput", offer.firstDueAt.slice(0, 10));
+        value("schedulerDescriptionInput", offer.description);
+        if (offer.authorizationExpiresAt) {
+            value("schedulerExpiresInput", offer.authorizationExpiresAt.slice(0, 10));
+        }
+
+        text("verifiedOfferTitle", offer.merchantName);
+        text(
+            "verifiedOfferDetails",
+            `${offer.description} · ${offer.billingModel || "recurring_fixed"} · ${offer.amount} ${offer.unit} · ${offer.interval} · ${shorten(verified.merchantPubkey, 10, 10)}`
+        );
+        $("verifiedSubscriptionOffer").hidden = false;
+        status("schedulerStatus", "Merchant signature verified. Review the limits before authorizing.", "success");
+    } catch (err) {
+        console.error(err);
+        $("verifiedSubscriptionOffer").hidden = true;
+        status("schedulerStatus", err?.message || String(err), "error");
+    }
 }
 
 async function refreshSwapHistory() {
@@ -1571,12 +1569,16 @@ async function connectWithString(raw, saveConnection) {
 
         client = new NwcKit({
             connection,
-            timeoutMs: 15000
+            timeoutMs: 15000,
+            onConnectionStateChange: setConnectionHealth
         });
 
         await client.connect();
         startAppMessages();
         const info = await client.getInfo();
+        walletInfo = info;
+        walletCapabilities = await client.getCapabilities(info);
+        updateSchedulerAuthorizationUi();
         await refreshHomeData();
 
         const relay = connection.relayUrl || "-";
@@ -1624,9 +1626,225 @@ async function disconnectWallet() {
     stopAppMessages();
     client = null;
     connection = null;
+    walletCapabilities = null;
     clearWalletInfo();
     setConnectedUi(false);
     status("nwcStringStatus", "Disconnected.", "info");
+}
+
+async function createSubscriptionAuthorization() {
+    if (!client || !appMessages) {
+        status("schedulerStatus", "Connect your main wallet first.", "error");
+        return;
+    }
+    if (walletCapabilities?.canCreateSubscriptionAuthorization !== true) {
+        status("schedulerStatus", "The connected provider does not support dedicated recurring authorizations yet.", "error");
+        return;
+    }
+    const schedulerPubkey = walletInfo?.subscription_scheduler_pubkey;
+    if (!isNostrPubkey(schedulerPubkey)) {
+        status("schedulerStatus", "The provider has not published a trusted scheduler identity.", "error");
+        return;
+    }
+    if (schedulerAsset !== "LNBTC") {
+        status("schedulerStatus", "LNUSDT recurring execution is gated until the Taproot Assets rail is active.", "error");
+        return;
+    }
+
+    const merchantPubkey = $("schedulerMerchantPubkeyInput").value.trim().toLowerCase();
+    const merchantName = $("schedulerMerchantNameInput").value.trim();
+    const subscriptionId = $("schedulerSubscriptionIdInput").value.trim() || `sub_${crypto.randomUUID()}`;
+    const amount = Number($("schedulerAmountInput").value);
+    const billingModel = $("schedulerBillingModelInput").value || "recurring_fixed";
+    const totalAmount = billingModel === "fixed_installments"
+        ? Number($("schedulerTotalAmountInput").value)
+        : null;
+    const installmentCount = billingModel === "fixed_installments"
+        ? Number($("schedulerInstallmentCountInput").value)
+        : null;
+    const maxSinglePayment = Number($("schedulerMaxSingleInput").value);
+    const maxPeriodSpend = Number($("schedulerMaxPeriodInput").value);
+    const interval = $("schedulerIntervalInput").value || "monthly";
+    const nextDueDateValue = $("schedulerNextDueInput").value;
+    const expiresDateValue = $("schedulerExpiresInput").value;
+    const description = $("schedulerDescriptionInput").value.trim() || "Recurring payment";
+
+    if (!isNostrPubkey(merchantPubkey)) {
+        status("schedulerStatus", "Merchant pubkey must be a 64-character Nostr public key.", "error");
+        return;
+    }
+    if (![amount, maxSinglePayment, maxPeriodSpend].every(Number.isFinite) ||
+        amount <= 0 || amount > maxSinglePayment || maxSinglePayment > maxPeriodSpend) {
+        status("schedulerStatus", "Use positive limits with amount ≤ maximum payment ≤ maximum period.", "error");
+        return;
+    }
+    if (billingModel === "fixed_installments" &&
+        (!Number.isFinite(totalAmount) || totalAmount <= 0 ||
+         !Number.isInteger(installmentCount) || installmentCount <= 0 || installmentCount > 10000 ||
+         totalAmount > amount * installmentCount || totalAmount <= amount * (installmentCount - 1))) {
+        status("schedulerStatus", "Total, installment amount and number of installments are inconsistent.", "error");
+        return;
+    }
+    if (!nextDueDateValue || !expiresDateValue || nextDueDateValue > expiresDateValue) {
+        status("schedulerStatus", "Choose valid first-payment and expiry dates.", "error");
+        return;
+    }
+
+    const dedicatedIdentity = generateNwcClientIdentity();
+    const nextDueAt = new Date(`${nextDueDateValue}T09:00:00`).toISOString();
+    const expiresAt = new Date(`${expiresDateValue}T23:59:59`).toISOString();
+    const scheduleId = crypto.randomUUID();
+
+    try {
+        status("schedulerStatus", "Creating a restricted NWC authorization...");
+        const descriptor = await client.request("create_subscription_authorization", {
+            client_pubkey: dedicatedIdentity.publicKey,
+            subscription_id: subscriptionId,
+            merchant_pubkey: merchantPubkey,
+            asset: schedulerAsset,
+            billing_model: billingModel,
+            amount: amountToApi(amount),
+            total_amount: totalAmount === null ? undefined : amountToApi(totalAmount),
+            installment_count: installmentCount ?? undefined,
+            max_single_payment: amountToApi(maxSinglePayment),
+            max_period_spend: amountToApi(maxPeriodSpend),
+            expires_at: expiresAt,
+            label: `Subscription ${merchantName || shorten(merchantPubkey, 8, 8)}`
+        });
+        if (!descriptor?.wallet_pubkey || !descriptor?.relay_url ||
+            descriptor.client_pubkey?.toLowerCase() !== dedicatedIdentity.publicKey.toLowerCase()) {
+            throw new Error("Provider returned an invalid subscription authorization descriptor.");
+        }
+        const dedicatedNwc = buildNwcUri({
+            walletPubkey: descriptor.wallet_pubkey,
+            relayUrl: descriptor.relay_url,
+            secret: dedicatedIdentity.secret
+        });
+        await appMessages.send({
+            recipientPubkey: schedulerPubkey,
+            type: "subscription.authorization_granted",
+            payload: {
+                scheduleId,
+                subscriptionId,
+                clientPubkey: dedicatedIdentity.publicKey,
+                merchantPubkey,
+                asset: schedulerAsset,
+                unit: schedulerAsset === "LNUSDT" ? "USDT" : "sat",
+                amount: amountToApi(amount),
+                billingModel,
+                totalAmount: totalAmount === null ? undefined : amountToApi(totalAmount),
+                installmentCount: installmentCount ?? undefined,
+                maxSinglePayment: amountToApi(maxSinglePayment),
+                maxPeriodSpend: amountToApi(maxPeriodSpend),
+                interval,
+                description,
+                nextDueAt,
+                expiresAt,
+                nwcConnectionUri: dedicatedNwc
+            }
+        });
+
+        upsertContact({
+            pubkey: merchantPubkey,
+            role: "merchant",
+            displayName: merchantName || "Merchant",
+            relayUrls: connection?.relayUrl ? [connection.relayUrl] : [],
+            source: "subscription",
+            createdAt: Date.now()
+        });
+        upsertSubscription({
+            scheduleId,
+            subscriptionId,
+            offerId: $("schedulerOfferReferenceInput").dataset.offerId || undefined,
+            merchantPubkey,
+            asset: schedulerAsset,
+            unit: schedulerAsset === "LNUSDT" ? "USDT" : "sat",
+            amount,
+            billingModel,
+            totalAmount,
+            installmentCount,
+            maxSinglePayment,
+            maxPeriodSpend,
+            interval,
+            nextDueDate: nextDueDateValue,
+            expiresDate: expiresDateValue,
+            description,
+            status: "active",
+            createdAt: Date.now()
+        });
+        selectedSubscriptionId = subscriptionId;
+        value("schedulerSubscriptionIdInput", subscriptionId);
+        updateSchedulerAuthorizationUi();
+        renderScheduler();
+        status("schedulerStatus", "Restricted authorization created and delivered to the scheduler.", "success");
+    } catch (err) {
+        console.error(err);
+        status("schedulerStatus", err?.message || String(err), "error");
+    }
+}
+
+async function revokeCurrentSubscriptionAuthorization() {
+    if (!client) {
+        status("schedulerStatus", "Connect your wallet first.", "error");
+        return;
+    }
+
+    if (walletCapabilities?.canPaySubscriptionInvoice === true &&
+        walletCapabilities?.canRevokeSubscription === true) {
+        const confirmed = window.confirm("Revoke this dedicated recurring-payment authorization?");
+        if (!confirmed) return;
+        try {
+            await client.revokeSubscription({ reason: "Revoked by the user from NwcWallet." });
+            clearSavedConnectionData();
+            value("nwcInput", "");
+            await disconnectWallet();
+            status("nwcStringStatus", "Recurring-payment authorization revoked.", "success");
+            setView("nwc-string");
+        } catch (err) {
+            status("schedulerStatus", err?.message || String(err), "error");
+        }
+        return;
+    }
+
+    const subscription = subscriptions.find(item => item.subscriptionId === selectedSubscriptionId);
+    if (!subscription || walletCapabilities?.canRevokeSubscriptionAuthorization !== true) {
+        status("schedulerStatus", "This connection has no recurring-payment authorization to revoke.", "error");
+        return;
+    }
+
+    const confirmed = window.confirm(
+        `Revoke the recurring authorization for ${subscription.description || subscription.subscriptionId}?`
+    );
+    if (!confirmed) return;
+
+    try {
+        status("schedulerStatus", "Revoking authorization...");
+        await client.request("revoke_subscription_authorization", {
+            subscription_id: subscription.subscriptionId,
+            reason: "Revoked by the user from NwcWallet."
+        });
+        const schedulerPubkey = walletInfo?.subscription_scheduler_pubkey;
+        if (appMessages && isNostrPubkey(schedulerPubkey)) {
+            await appMessages.send({
+                recipientPubkey: schedulerPubkey,
+                type: "subscription.revoke",
+                payload: {
+                    subscriptionId: subscription.subscriptionId,
+                    merchantPubkey: subscription.merchantPubkey,
+                    customerPubkey: appMessages.pubkey,
+                    reason: "Revoked by the user from NwcWallet.",
+                    createdAt: new Date().toISOString()
+                }
+            });
+        }
+        upsertSubscription({ ...subscription, status: "revoked", revokedAt: Date.now() });
+        updateSchedulerAuthorizationUi();
+        renderScheduler();
+        status("schedulerStatus", "Recurring-payment authorization revoked.", "success");
+    } catch (err) {
+        console.error(err);
+        status("schedulerStatus", err?.message || String(err), "error");
+    }
 }
 
 async function createInvoice() {
@@ -1673,134 +1891,6 @@ async function createInvoice() {
     }
 }
 
-function saveSchedulerSubscription() {
-    if (!appMessages) {
-        status("schedulerStatus", "Connect your wallet first.", "error");
-        setView("nwc-string");
-        return false;
-    }
-
-    syncBillingPeriod(false);
-
-    const merchantPubkey = $("schedulerMerchantPubkeyInput").value.trim();
-    const merchantName = $("schedulerMerchantNameInput").value.trim();
-    const subscriptionId = $("schedulerSubscriptionIdInput").value.trim() || `sub_${Date.now()}`;
-    const amountSats = Number($("schedulerAmountInput").value);
-    const interval = $("schedulerIntervalInput").value || "monthly";
-    const nextDueDateValue = $("schedulerNextDueInput").value || todayIsoDate();
-    const billingPeriod = $("schedulerBillingPeriodInput").value.trim();
-    const description = $("schedulerDescriptionInput").value.trim();
-
-    if (!/^[0-9a-fA-F]{64}$/.test(merchantPubkey)) {
-        status("schedulerStatus", "Merchant pubkey must be a 64-char hex key.", "error");
-        return false;
-    }
-
-    if (!Number.isFinite(amountSats) || amountSats <= 0) {
-        status("schedulerStatus", "Enter a valid amount.", "error");
-        return false;
-    }
-
-    if (!billingPeriod) {
-        status("schedulerStatus", "Billing period is required.", "error");
-        return false;
-    }
-
-    upsertContact({
-        pubkey: merchantPubkey,
-        role: "merchant",
-        displayName: merchantName || "Merchant",
-        relayUrls: connection?.relayUrl ? [connection.relayUrl] : [],
-        source: "manual",
-        createdAt: Date.now()
-    });
-
-    upsertSubscription({
-        subscriptionId,
-        merchantPubkey,
-        customerPubkey: appMessages.pubkey,
-        amountSats: Math.round(amountSats),
-        maxAmountSats: Math.round(amountSats),
-        interval,
-        nextDueDate: nextDueDateValue,
-        billingPeriod,
-        description: description || "Recurring payment",
-        status: "active",
-        paymentPolicy: "manual_confirm",
-        createdAt: Date.now()
-    });
-
-    value("schedulerSubscriptionIdInput", subscriptionId);
-    status("schedulerStatus", "Subscription saved.", "success");
-    return true;
-}
-
-async function sendSchedulerInvoiceRequest() {
-    if (!appMessages) {
-        status("schedulerStatus", "Connect your wallet first.", "error");
-        setView("nwc-string");
-        return;
-    }
-
-    if (!saveSchedulerSubscription()) {
-        return;
-    }
-
-    const merchantPubkey = $("schedulerMerchantPubkeyInput").value.trim();
-    const subscriptionId = $("schedulerSubscriptionIdInput").value.trim();
-    const amountSatsExpected = Number($("schedulerAmountInput").value);
-    const interval = $("schedulerIntervalInput").value || "monthly";
-    const nextDueDateValue = $("schedulerNextDueInput").value || todayIsoDate();
-    const billingPeriod = $("schedulerBillingPeriodInput").value.trim();
-
-    if (!subscriptionId || !merchantPubkey || !billingPeriod) {
-        status("schedulerStatus", "Save the subscription first.", "error");
-        return;
-    }
-
-    try {
-        const requestCode = generateInvoiceRequestCode();
-        const createdAt = new Date();
-        const expiresAt = new Date(createdAt.getTime() + 15 * 60 * 1000);
-        const payload = {
-            subscriptionId,
-            merchantPubkey,
-            customerPubkey: appMessages.pubkey,
-            billingPeriod,
-            requestCode,
-            amountSatsExpected: Math.round(amountSatsExpected),
-            createdAt: createdAt.toISOString(),
-            expiresAt: expiresAt.toISOString()
-        };
-
-        status("schedulerStatus", "Sending invoice request...");
-        await appMessages.send({
-            recipientPubkey: merchantPubkey,
-            type: "subscription.invoice_request",
-            payload
-        });
-
-        addPendingInvoiceRequest(payload);
-        const subscription = subscriptions.find(item => item.subscriptionId === subscriptionId);
-        if (subscription && interval !== "custom") {
-            upsertSubscription({
-                ...subscription,
-                lastRequestedBillingPeriod: billingPeriod,
-                lastInvoiceRequestedAt: Date.now(),
-                nextDueDate: nextDueDate(interval, nextDueDateValue),
-                billingPeriod: generateBillingPeriod(interval, nextDueDate(interval, nextDueDateValue))
-            });
-            value("schedulerNextDueInput", nextDueDate(interval, nextDueDateValue));
-            value("schedulerBillingPeriodInput", generateBillingPeriod(interval, nextDueDate(interval, nextDueDateValue)));
-        }
-        status("schedulerStatus", `Invoice request sent. Code ${shorten(requestCode, 8, 8)}`, "success");
-        renderScheduler();
-    } catch (err) {
-        console.error(err);
-        status("schedulerStatus", err?.message || String(err), "error");
-    }
-}
-
 async function payInvoice() {
     if (!client) {
         status("payStatus", "Wallet not connected.", "error");
@@ -1833,6 +1923,21 @@ async function payInvoice() {
         await refreshHomeData();
     } catch (err) {
         console.error(err);
+        if (["TIMEOUT", "RELAY_TIMEOUT", "DISCONNECTED", "PAYMENT_UNKNOWN"].includes(err?.code)) {
+            status("payStatus", "Payment outcome is uncertain. Do not retry while the wallet verifies it.", "error");
+            if (payAsset === "LNBTC") {
+                try {
+                    const lookup = await client.lookupInvoice({ invoice });
+                    if (lookup?.state === "settled") {
+                        status("payStatus", "Payment verified as sent after reconnecting.", "success");
+                        await refreshHomeData();
+                    }
+                } catch (lookupError) {
+                    console.warn("Payment reconciliation is still pending", lookupError);
+                }
+            }
+            return;
+        }
         status("payStatus", err?.message || String(err), "error");
     }
 }
@@ -1874,6 +1979,42 @@ function setPayAsset(asset) {
     text("payInvoiceLabel", payAsset === "LNUSDT" ? "USDT Lightning invoice" : "Lightning invoice");
     $("payInvoiceInput").placeholder = payAsset === "LNUSDT" ? "ln..." : "lnbc...";
     status("payStatus", "");
+}
+
+function setSchedulerAsset(asset) {
+    schedulerAsset = asset === "LNUSDT" ? "LNUSDT" : "LNBTC";
+    document.querySelectorAll("[data-scheduler-asset]").forEach(button => {
+        const active = button.dataset.schedulerAsset === schedulerAsset;
+        button.classList.toggle("active", active);
+        button.setAttribute("aria-selected", active ? "true" : "false");
+    });
+    const isUsdt = schedulerAsset === "LNUSDT";
+    ["schedulerAmountInput", "schedulerMaxSingleInput", "schedulerMaxPeriodInput", "schedulerTotalAmountInput"].forEach(id => {
+        const input = $(id);
+        input.min = isUsdt ? "0.01" : "1";
+        input.step = isUsdt ? "0.01" : "1";
+    });
+    updateSchedulerBillingModelUi();
+    updateSchedulerAuthorizationUi();
+    status(
+        "schedulerStatus",
+        isUsdt ? "LNUSDT recurring execution is visible but remains technically gated." : "",
+        isUsdt ? "info" : "info"
+    );
+}
+
+function updateSchedulerBillingModelUi() {
+    const model = $("schedulerBillingModelInput")?.value || "recurring_fixed";
+    const unit = schedulerAsset === "LNUSDT" ? "USDT" : "sats";
+    $("schedulerInstallmentFields").hidden = model !== "fixed_installments";
+    text(
+        "schedulerAmountLabel",
+        model === "recurring_variable"
+            ? `Maximum expected amount ${unit}`
+            : model === "fixed_installments"
+                ? `Installment amount ${unit}`
+                : `Amount ${unit}`
+    );
 }
 
 function setSwapMode(mode) {
@@ -2048,7 +2189,8 @@ async function createForwardSwap() {
 
     try {
         status("swapStatus", "Creating swap...");
-        const swap = await client.createSwap(buildSwapRequest(amount, destination));
+        const swap = await client.createSwap(withSwapRequestId(buildSwapRequest(amount, destination)));
+        pendingSwapAttempt = null;
 
         const resultValue = swap.depositAddress || swap.invoice || "";
         lastSwapDepositAddress = resultValue;
@@ -2102,7 +2244,8 @@ async function createReverseSwap() {
 
     try {
         status("swapStatus", "Creating withdrawal...");
-        const swap = await client.createSwap(buildReverseSwapRequest(amount, address));
+        const swap = await client.createSwap(withSwapRequestId(buildReverseSwapRequest(amount, address)));
+        pendingSwapAttempt = null;
 
         const invoice = swap.invoice || "";
         addSwapHistory({
@@ -2186,9 +2329,14 @@ function updateReverseSwapAddressPreview(address) {
     text("reverseSwapAddressShort", shorten(address, 14, 14));
 }
 
-function applyScannedValue(targetId, rawValue) {
+async function applyScannedValue(targetId, rawValue) {
     const scannedValue = normalizeScannedValue(targetId, rawValue);
     value(targetId, scannedValue);
+
+    if (targetId === "schedulerOfferReferenceInput") {
+        await loadScannedSubscriptionOffer(scannedValue);
+        return;
+    }
 
     if (targetId === "payInvoiceInput") {
         updatePayInvoicePreview(scannedValue);
@@ -2288,13 +2436,17 @@ async function openScanner(targetId, statusId) {
         qrReader = qrReader || new BrowserQRCodeReader();
         scannerControls = await qrReader.decodeFromVideoElement(
             video,
-            (result) => {
+            async (result) => {
                 if (!result) return;
 
                 const scannedText = result.getText();
-                applyScannedValue(activeScanTarget, scannedText);
-                status(activeScanStatus, "QR acquired.", "success");
+                const scanTarget = activeScanTarget;
+                const scanStatus = activeScanStatus;
                 closeScanner();
+                await applyScannedValue(scanTarget, scannedText);
+                if (scanTarget !== "schedulerOfferReferenceInput") {
+                    status(scanStatus, "QR acquired.", "success");
+                }
             }
         );
 
@@ -2412,6 +2564,10 @@ function wireEvents() {
         button.addEventListener("click", () => setPayAsset(button.dataset.payAsset));
     });
 
+    document.querySelectorAll("[data-scheduler-asset]").forEach(button => {
+        button.addEventListener("click", () => setSchedulerAsset(button.dataset.schedulerAsset));
+    });
+
     document.querySelectorAll("[data-scan-target]").forEach(button => {
         button.addEventListener("click", () => openScanner(button.dataset.scanTarget, button.dataset.scanStatus));
     });
@@ -2429,14 +2585,15 @@ function wireEvents() {
     });
     $("refreshTransactionsButton").addEventListener("click", refreshTransactions);
     $("refreshSwapsButton").addEventListener("click", refreshSwapHistory);
-    $("saveSchedulerButton").addEventListener("click", saveSchedulerSubscription);
-    $("requestSubscriptionInvoiceButton").addEventListener("click", sendSchedulerInvoiceRequest);
-    $("generateBillingPeriodButton").addEventListener("click", () => {
-        syncBillingPeriod(true);
-        status("schedulerStatus", "Billing period generated.", "success");
+    $("createSubscriptionAuthorizationButton").addEventListener("click", createSubscriptionAuthorization);
+    $("revokeSubscriptionAuthorizationButton").addEventListener("click", revokeCurrentSubscriptionAuthorization);
+    $("loadSubscriptionOfferButton").addEventListener("click", () => loadScannedSubscriptionOffer());
+    $("schedulerBillingModelInput").addEventListener("change", updateSchedulerBillingModelUi);
+    $("schedulerAmountInput").addEventListener("change", event => {
+        const amount = event.target.value;
+        if (!$("schedulerMaxSingleInput").value) value("schedulerMaxSingleInput", amount);
+        if (!$("schedulerMaxPeriodInput").value) value("schedulerMaxPeriodInput", amount);
     });
-    $("schedulerIntervalInput").addEventListener("change", () => syncBillingPeriod(true));
-    $("schedulerNextDueInput").addEventListener("change", () => syncBillingPeriod(true));
 
     $("createInvoiceButton").addEventListener("click", createInvoice);
     $("payInvoiceButton").addEventListener("click", payInvoice);
@@ -2531,6 +2688,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     loadSchedulerState();
     renderScheduler();
     setDefaultSchedulerDates();
+    setSchedulerAsset("LNBTC");
     const savedConnection = restoreSavedConnection();
     updateDeviceUnlockUi();
     clearWalletInfo();
